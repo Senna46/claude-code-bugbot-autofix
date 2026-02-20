@@ -2,18 +2,23 @@
 // Clones the target repository locally, checks out the PR head branch,
 // runs claude -p with edit tools to fix detected Cursor Bugbot bugs,
 // then commits and pushes the fix directly to the PR head branch.
+// Includes PR diff and changed file contents as context for better fixes.
 // Limitations: Requires git CLI with push access to the target repo.
 //   Claude may not fix all bugs or may introduce new issues.
 //   Only one fix generation runs at a time per PR.
 
 import { execFile, spawn } from "child_process";
 import { existsSync } from "fs";
+import { readFile } from "fs/promises";
 import { mkdir } from "fs/promises";
 import { join } from "path";
 import { promisify } from "util";
 
 import { logger } from "./logger.js";
 import type { BugbotBug, Config, FixResult, PullRequest } from "./types.js";
+
+const MAX_DIFF_SIZE = 100_000;
+const MAX_FILE_CONTEXT_SIZE = 200_000;
 
 const execFileAsync = promisify(execFile);
 
@@ -41,7 +46,14 @@ export class FixGenerator {
 
     try {
       await this.checkoutPrBranch(repoDir, pr);
-      await this.runClaudeFix(repoDir, bugs);
+
+      const prDiff = await this.getPrDiff(repoDir, pr);
+      const changedFileContents = await this.getChangedFileContents(
+        repoDir,
+        prDiff
+      );
+
+      await this.runClaudeFix(repoDir, bugs, prDiff, changedFileContents);
 
       const hasChanges = await this.hasUncommittedChanges(repoDir);
       if (!hasChanges) {
@@ -141,7 +153,9 @@ export class FixGenerator {
 
   private async runClaudeFix(
     repoDir: string,
-    bugs: BugbotBug[]
+    bugs: BugbotBug[],
+    prDiff: string,
+    changedFileContents: Map<string, string>
   ): Promise<void> {
     const bugDescriptions = bugs
       .map(
@@ -152,12 +166,32 @@ export class FixGenerator {
       )
       .join("\n\n");
 
+    let fileContentsSection = "";
+    if (changedFileContents.size > 0) {
+      const entries = [...changedFileContents.entries()]
+        .map(([path, content]) => `--- ${path} ---\n${content}`)
+        .join("\n\n");
+      fileContentsSection =
+        "\n\n## Current contents of changed files\n\n" + entries;
+    }
+
+    let diffSection = "";
+    if (prDiff) {
+      const truncatedDiff =
+        prDiff.length > MAX_DIFF_SIZE
+          ? prDiff.substring(0, MAX_DIFF_SIZE) + "\n... (diff truncated)"
+          : prDiff;
+      diffSection = "\n\n## PR diff\n\n```diff\n" + truncatedDiff + "\n```";
+    }
+
     const prompt =
       "Fix the following bugs reported by Cursor Bugbot in this codebase. " +
       "Make minimal, targeted changes that address only the identified issues. " +
       "Do not refactor unrelated code or change formatting.\n\n" +
-      `Bugs to fix:\n${bugDescriptions}\n\n` +
-      "For each bug, make the necessary code changes to fix it. " +
+      `## Bugs to fix\n\n${bugDescriptions}` +
+      diffSection +
+      fileContentsSection +
+      "\n\nFor each bug, make the necessary code changes to fix it. " +
       "Commit messages are not needed - just make the file changes.";
 
     const args = [
@@ -216,6 +250,80 @@ export class FixGenerator {
   }
 
   // ============================================================
+  // PR context: diff and changed file contents
+  // ============================================================
+
+  private async getPrDiff(
+    repoDir: string,
+    pr: PullRequest
+  ): Promise<string> {
+    try {
+      const diff = await this.execGit(repoDir, [
+        "diff",
+        `origin/${pr.baseRef}...HEAD`,
+      ]);
+
+      logger.info("Retrieved PR diff.", {
+        diffLength: diff.length,
+        baseRef: pr.baseRef,
+      });
+
+      return diff;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("Failed to retrieve PR diff, continuing without it.", {
+        error: message,
+        baseRef: pr.baseRef,
+      });
+      return "";
+    }
+  }
+
+  private async getChangedFileContents(
+    repoDir: string,
+    prDiff: string
+  ): Promise<Map<string, string>> {
+    const filePaths = extractChangedFilePaths(prDiff);
+    const contents = new Map<string, string>();
+    let totalSize = 0;
+
+    for (const filePath of filePaths) {
+      if (totalSize >= MAX_FILE_CONTEXT_SIZE) {
+        logger.debug("File context size limit reached, skipping remaining files.", {
+          totalSize,
+          limit: MAX_FILE_CONTEXT_SIZE,
+          skippedFile: filePath,
+        });
+        break;
+      }
+
+      const absolutePath = join(repoDir, filePath);
+      try {
+        const content = await readFile(absolutePath, "utf-8");
+        const remainingBudget = MAX_FILE_CONTEXT_SIZE - totalSize;
+        if (content.length > remainingBudget) {
+          contents.set(filePath, content.substring(0, remainingBudget) + "\n... (truncated)");
+          totalSize = MAX_FILE_CONTEXT_SIZE;
+        } else {
+          contents.set(filePath, content);
+          totalSize += content.length;
+        }
+      } catch {
+        logger.debug("Could not read changed file, skipping.", { filePath });
+      }
+    }
+
+    if (contents.size > 0) {
+      logger.info(`Loaded ${contents.size} changed file(s) as context.`, {
+        filePaths: [...contents.keys()],
+        totalSize,
+      });
+    }
+
+    return contents;
+  }
+
+  // ============================================================
   // Git operations
   // ============================================================
 
@@ -254,4 +362,25 @@ export class FixGenerator {
     });
     return stdout;
   }
+}
+
+// ============================================================
+// Utility: extract changed file paths from a unified diff
+// ============================================================
+
+function extractChangedFilePaths(diff: string): string[] {
+  const paths: string[] = [];
+  const seen = new Set<string>();
+
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("+++ b/")) {
+      const filePath = line.substring(6);
+      if (!seen.has(filePath)) {
+        seen.add(filePath);
+        paths.push(filePath);
+      }
+    }
+  }
+
+  return paths;
 }
