@@ -73,7 +73,7 @@ export class FixGenerator {
         branch: pr.headRef,
         error: message,
       });
-      return null;
+      throw error;
     }
   }
 

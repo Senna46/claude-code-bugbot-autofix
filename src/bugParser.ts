@@ -8,7 +8,7 @@ import type { BugSeverity, BugbotBug } from "./types.js";
 import type { ReviewComment } from "./githubClient.js";
 import { logger } from "./logger.js";
 
-const BUGBOT_BUG_ID_PATTERN = /<!-- BUGBOT_BUG_ID:\s*([0-9a-f-]+)\s*-->/;
+const BUGBOT_BUG_ID_PATTERN = /<!-- BUGBOT_BUG_ID:\s*([0-9a-zA-Z_-]+)\s*-->/;
 const DESCRIPTION_PATTERN = /<!-- DESCRIPTION START -->([\s\S]*?)<!-- DESCRIPTION END -->/;
 const LOCATIONS_PATTERN = /<!-- LOCATIONS START\n([\s\S]*?)LOCATIONS END -->/;
 const TITLE_PATTERN = /^###\s+(.+)$/m;

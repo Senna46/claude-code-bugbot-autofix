@@ -1,6 +1,7 @@
 // Monitor for Cursor Bugbot review comments on GitHub PRs.
-// Scans monitored repos/orgs for open PRs, fetches review comments
-// from cursor[bot], parses bug reports, and filters out already-processed bugs.
+// Uses repo-level review comment API to efficiently find cursor[bot]
+// comments without scanning every open PR individually.
+// Only PRs with unprocessed, non-resolved Bugbot comments are returned.
 // Limitations: Only detects bugs from cursor[bot] review comments
 //   with the BUGBOT_BUG_ID marker. Does not handle issue comments.
 
@@ -8,12 +9,15 @@ import { isBugbotComment, parseBugbotComment } from "./bugParser.js";
 import type { GitHubClient } from "./githubClient.js";
 import { logger } from "./logger.js";
 import type { StateStore } from "./state.js";
-import type { Config, PrBugReport, PullRequest } from "./types.js";
+import type { Config, PrBugReport } from "./types.js";
+
+const DEFAULT_LOOKBACK_DAYS = 7;
 
 export class BugbotMonitor {
   private github: GitHubClient;
   private state: StateStore;
   private config: Config;
+  private lastPollTime: Date | null = null;
 
   constructor(github: GitHubClient, state: StateStore, config: Config) {
     this.github = github;
@@ -22,26 +26,72 @@ export class BugbotMonitor {
   }
 
   // ============================================================
-  // Main: Discover unprocessed Bugbot bugs across all monitored PRs
+  // Main: Discover unprocessed Bugbot bugs across all monitored repos
   // ============================================================
 
   async discoverUnprocessedBugs(): Promise<PrBugReport[]> {
-    const allPrs = await this.getAllMonitoredPrs();
-    logger.info(`Found ${allPrs.length} open PR(s) across monitored repos.`);
+    const cycleStart = new Date();
+    const since = this.computeSince();
+
+    const repos = await this.getAllMonitoredRepos();
+    logger.info(`Scanning ${repos.length} repo(s) for cursor[bot] comments since ${since}.`);
 
     const reports: PrBugReport[] = [];
 
-    for (const pr of allPrs) {
+    for (const { owner, repo } of repos) {
       try {
-        const report = await this.scanPrForBugs(pr);
+        const repoReports = await this.scanRepoForBugs(owner, repo, since);
+        reports.push(...repoReports);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.error(`Error scanning repo ${owner}/${repo}.`, {
+          error: message,
+          repo: `${owner}/${repo}`,
+        });
+      }
+    }
+
+    this.lastPollTime = cycleStart;
+    return reports;
+  }
+
+  // ============================================================
+  // Scan a single repo for Bugbot bugs (repo-level comment fetch)
+  // ============================================================
+
+  private async scanRepoForBugs(
+    owner: string,
+    repo: string,
+    since: string
+  ): Promise<PrBugReport[]> {
+    const commentsByPr = await this.github.listRepoBugbotComments(
+      owner,
+      repo,
+      since
+    );
+
+    if (commentsByPr.size === 0) {
+      return [];
+    }
+
+    const reports: PrBugReport[] = [];
+
+    for (const [prNumber, comments] of commentsByPr) {
+      try {
+        const report = await this.processPrComments(
+          owner,
+          repo,
+          prNumber,
+          comments
+        );
         if (report && report.bugs.length > 0) {
           reports.push(report);
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         logger.error(
-          `Error scanning PR #${pr.number} in ${pr.owner}/${pr.repo}.`,
-          { error: message, prNumber: pr.number, repo: `${pr.owner}/${pr.repo}` }
+          `Error processing comments for PR #${prNumber} in ${owner}/${repo}.`,
+          { error: message, prNumber, repo: `${owner}/${repo}` }
         );
       }
     }
@@ -50,35 +100,41 @@ export class BugbotMonitor {
   }
 
   // ============================================================
-  // Scan a single PR for Bugbot bugs
+  // Process cursor[bot] comments for a single PR
   // ============================================================
 
-  private async scanPrForBugs(pr: PullRequest): Promise<PrBugReport | null> {
-    const comments = await this.github.listReviewComments(
-      pr.owner,
-      pr.repo,
-      pr.number
-    );
-
+  private async processPrComments(
+    owner: string,
+    repo: string,
+    prNumber: number,
+    comments: import("./githubClient.js").ReviewComment[]
+  ): Promise<PrBugReport | null> {
     const bugbotComments = comments.filter(isBugbotComment);
-
     if (bugbotComments.length === 0) {
       return null;
     }
 
-    logger.debug(
-      `Found ${bugbotComments.length} Bugbot comment(s) on PR #${pr.number}.`,
-      { owner: pr.owner, repo: pr.repo, prNumber: pr.number }
+    const resolvedIds = await this.github.getResolvedCommentIds(
+      owner,
+      repo,
+      prNumber
     );
 
     const unprocessedBugs = [];
 
     for (const comment of bugbotComments) {
+      if (resolvedIds.has(comment.id)) {
+        logger.debug("Bug comment resolved, skipping.", {
+          commentId: comment.id,
+        });
+        continue;
+      }
+
       const bug = parseBugbotComment(comment);
       if (!bug) continue;
 
       if (this.state.isBugProcessed(bug.bugId)) {
-        logger.debug(`Bug already processed, skipping.`, { bugId: bug.bugId });
+        logger.debug("Bug already processed, skipping.", { bugId: bug.bugId });
         continue;
       }
 
@@ -89,11 +145,16 @@ export class BugbotMonitor {
       return null;
     }
 
+    const pr = await this.github.getPullRequest(owner, repo, prNumber);
+    if (!pr) {
+      return null;
+    }
+
     logger.info(
-      `PR #${pr.number} in ${pr.owner}/${pr.repo}: ${unprocessedBugs.length} unprocessed bug(s) found.`,
+      `PR #${prNumber} in ${owner}/${repo}: ${unprocessedBugs.length} unprocessed bug(s) found.`,
       {
-        prNumber: pr.number,
-        repo: `${pr.owner}/${pr.repo}`,
+        prNumber,
+        repo: `${owner}/${repo}`,
         bugCount: unprocessedBugs.length,
         bugIds: unprocessedBugs.map((b) => b.bugId),
       }
@@ -103,11 +164,13 @@ export class BugbotMonitor {
   }
 
   // ============================================================
-  // List all open PRs across monitored repos and orgs
+  // List all monitored repos from config
   // ============================================================
 
-  private async getAllMonitoredPrs(): Promise<PullRequest[]> {
-    const allPrs: PullRequest[] = [];
+  private async getAllMonitoredRepos(): Promise<
+    Array<{ owner: string; repo: string }>
+  > {
+    const allRepos: Array<{ owner: string; repo: string }> = [];
     const processedRepos = new Set<string>();
 
     for (const repoSpec of this.config.githubRepos) {
@@ -116,16 +179,7 @@ export class BugbotMonitor {
       const repoKey = `${owner}/${repo}`;
       if (processedRepos.has(repoKey)) continue;
       processedRepos.add(repoKey);
-
-      try {
-        const prs = await this.github.listOpenPullRequests(owner, repo);
-        allPrs.push(...prs);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.error(`Failed to list PRs for ${repoKey}.`, {
-          error: message, repo: repoKey,
-        });
-      }
+      allRepos.push({ owner, repo });
     }
 
     for (const org of this.config.githubOrgs) {
@@ -135,28 +189,29 @@ export class BugbotMonitor {
           const repoKey = `${repo.owner}/${repo.name}`;
           if (processedRepos.has(repoKey)) continue;
           processedRepos.add(repoKey);
-
-          try {
-            const prs = await this.github.listOpenPullRequests(
-              repo.owner,
-              repo.name
-            );
-            allPrs.push(...prs);
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            logger.error(`Failed to list PRs for ${repoKey}.`, {
-              error: message, repo: repoKey,
-            });
-          }
+          allRepos.push({ owner: repo.owner, repo: repo.name });
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         logger.error(`Failed to list repos for org "${org}".`, {
-          error: message, org,
+          error: message,
+          org,
         });
       }
     }
 
-    return allPrs;
+    return allRepos;
+  }
+
+  // ============================================================
+  // Compute the "since" timestamp for the API query
+  // ============================================================
+
+  private computeSince(): string {
+    if (this.lastPollTime) {
+      return this.lastPollTime.toISOString();
+    }
+    const lookbackMs = DEFAULT_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
+    return new Date(Date.now() - lookbackMs).toISOString();
   }
 }

@@ -5,6 +5,9 @@
 // Limitations: Single-threaded; processes PRs sequentially
 //   within each polling cycle. Graceful shutdown on SIGINT/SIGTERM.
 
+import { openSync, closeSync, unlinkSync, writeFileSync } from "fs";
+import { dirname, join } from "path";
+
 import { BugbotMonitor } from "./bugbotMonitor.js";
 import { loadConfig } from "./config.js";
 import { FixGenerator } from "./fixGenerator.js";
@@ -94,8 +97,8 @@ class AutofixDaemon {
       if (!existsSync(credFile)) {
         logger.warn(
           "No Claude authentication detected. " +
-            "On macOS Docker, set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token' to generate). " +
-            "On Linux, ensure ~/.claude is mounted and contains .credentials.json."
+          "On macOS Docker, set CLAUDE_CODE_OAUTH_TOKEN (run 'claude setup-token' to generate). " +
+          "On Linux, ensure ~/.claude is mounted and contains .credentials.json."
         );
       }
     }
@@ -217,7 +220,7 @@ class AutofixDaemon {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error(
-        `Error processing PR #${pr.number} in ${repoFullName}.`,
+        `Error processing PR #${pr.number} in ${repoFullName}. Bugs will be retried next cycle.`,
         { error: message, prNumber: pr.number, repo: repoFullName }
       );
     }
@@ -240,7 +243,7 @@ class AutofixDaemon {
 
     const body =
       `${AUTOFIX_COMMENT_MARKER}\n` +
-      `[Bugbot Autofix](https://github.com/Senna46/bugbot-autofix) committed fixes to address ` +
+      `[Bugbot Autofix](https://github.com/Senna46/claude-code-bugbot-autofix) committed fixes to address ` +
       `${fixResult.fixedBugs.length} Cursor Bugbot issue(s) ([${commitShort}](${commitUrl})).\n\n` +
       `**Fixed issues:**\n${fixedList}`;
 
@@ -299,13 +302,48 @@ class AutofixDaemon {
 }
 
 // ============================================================
+// Single-instance lock
+// ============================================================
+
+function acquireLock(dbPath: string): string {
+  const lockPath = join(dirname(dbPath), "daemon.lock");
+  try {
+    const fd = openSync(lockPath, "wx");
+    writeFileSync(fd, String(process.pid));
+    closeSync(fd);
+    return lockPath;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      const { readFileSync, existsSync } = require("fs") as typeof import("fs");
+      const existingPid = readFileSync(lockPath, "utf-8").trim();
+      throw new Error(
+        `Another daemon instance is already running (PID ${existingPid}, lock: ${lockPath}). ` +
+          "Stop the existing instance first or remove the lock file if the process is not running."
+      );
+    }
+    throw error;
+  }
+}
+
+function releaseLock(lockPath: string): void {
+  try {
+    unlinkSync(lockPath);
+  } catch {
+    // Best-effort cleanup
+  }
+}
+
+// ============================================================
 // Entry point
 // ============================================================
 
 async function main(): Promise<void> {
+  let lockPath: string | null = null;
   try {
     const config = loadConfig();
     setLogLevel(config.logLevel);
+
+    lockPath = acquireLock(config.dbPath);
 
     const daemon = new AutofixDaemon(config);
     await daemon.initialize();
@@ -314,6 +352,8 @@ async function main(): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[FATAL] ${message}`);
     process.exit(1);
+  } finally {
+    if (lockPath) releaseLock(lockPath);
   }
 }
 
