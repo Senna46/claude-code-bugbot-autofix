@@ -313,6 +313,15 @@ class AutofixDaemon {
 // Single-instance lock
 // ============================================================
 
+function isProcessRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function acquireLock(dbPath: string): string {
   const lockPath = join(dirname(dbPath), "daemon.lock");
   try {
@@ -323,10 +332,21 @@ function acquireLock(dbPath: string): string {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EEXIST") {
       const existingPid = readFileSync(lockPath, "utf-8").trim();
-      throw new Error(
-        `Another daemon instance is already running (PID ${existingPid}, lock: ${lockPath}). ` +
-          "Stop the existing instance first or remove the lock file if the process is not running."
-      );
+      const pid = parseInt(existingPid, 10);
+
+      if (!isNaN(pid) && isProcessRunning(pid)) {
+        throw new Error(
+          `Another daemon instance is already running (PID ${existingPid}, lock: ${lockPath}). ` +
+            "Stop the existing instance first."
+        );
+      }
+
+      // Stale lock file from a crashed process — reclaim it
+      unlinkSync(lockPath);
+      const fd = openSync(lockPath, "wx");
+      writeFileSync(fd, String(process.pid));
+      closeSync(fd);
+      return lockPath;
     }
     throw error;
   }

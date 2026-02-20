@@ -225,12 +225,11 @@ export class GitHubClient {
     let cursor: string | null = null;
 
     while (hasNextPage) {
-      const afterClause = cursor ? `, after: "${cursor}"` : "";
       const query = `
-        query {
-          repository(owner: "${owner}", name: "${repo}") {
-            pullRequest(number: ${prNumber}) {
-              reviewThreads(first: 100${afterClause}) {
+        query($owner: String!, $repo: String!, $prNumber: Int!, $after: String) {
+          repository(owner: $owner, name: $repo) {
+            pullRequest(number: $prNumber) {
+              reviewThreads(first: 100, after: $after) {
                 pageInfo {
                   hasNextPage
                   endCursor
@@ -250,7 +249,12 @@ export class GitHubClient {
       `;
 
       const response: GraphQLReviewThreadsResponse =
-        await this.octokit.graphql(query);
+        await this.octokit.graphql(query, {
+          owner,
+          repo,
+          prNumber,
+          after: cursor,
+        });
 
       const pullRequest = response.repository.pullRequest;
       if (!pullRequest) {

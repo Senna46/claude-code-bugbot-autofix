@@ -110,6 +110,23 @@ export class BugbotMonitor {
       return null;
     }
 
+    // First pass: filter out already-processed bugs (cheap local check)
+    const candidateComments = [];
+    for (const comment of bugbotComments) {
+      const bug = parseBugbotComment(comment);
+      if (!bug) continue;
+      if (this.state.isBugProcessed(bug.bugId)) {
+        logger.debug("Bug already processed, skipping.", { bugId: bug.bugId });
+        continue;
+      }
+      candidateComments.push({ comment, bug });
+    }
+
+    if (candidateComments.length === 0) {
+      return null;
+    }
+
+    // Second pass: filter out resolved threads (expensive GraphQL call)
     const resolvedIds = await this.github.getResolvedCommentIds(
       owner,
       repo,
@@ -118,19 +135,11 @@ export class BugbotMonitor {
 
     const unprocessedBugs = [];
 
-    for (const comment of bugbotComments) {
+    for (const { comment, bug } of candidateComments) {
       if (resolvedIds.has(comment.id)) {
         logger.debug("Bug comment resolved, skipping.", {
           commentId: comment.id,
         });
-        continue;
-      }
-
-      const bug = parseBugbotComment(comment);
-      if (!bug) continue;
-
-      if (this.state.isBugProcessed(bug.bugId)) {
-        logger.debug("Bug already processed, skipping.", { bugId: bug.bugId });
         continue;
       }
 
