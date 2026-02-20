@@ -134,16 +134,35 @@ export class BugbotMonitor {
     );
 
     const unprocessedBugs = [];
+    const resolvedBugs = [];
 
     for (const { comment, bug } of candidateComments) {
       if (resolvedIds.has(comment.id)) {
         logger.debug("Bug comment resolved, skipping.", {
           commentId: comment.id,
         });
+        resolvedBugs.push(bug);
         continue;
       }
 
       unprocessedBugs.push(bug);
+    }
+
+    // Mark resolved bugs with a terminal state so stale FAILED records
+    // don't permanently disable the time filter in computeSince().
+    if (resolvedBugs.length > 0) {
+      this.state.recordProcessedBugs(
+        resolvedBugs.map((b) => ({
+          bugId: b.bugId,
+          repo: `${owner}/${repo}`,
+          prNumber,
+        })),
+        "SKIPPED_RESOLVED"
+      );
+      logger.debug(
+        `Marked ${resolvedBugs.length} resolved bug(s) as SKIPPED_RESOLVED.`,
+        { prNumber, repo: `${owner}/${repo}`, bugIds: resolvedBugs.map((b) => b.bugId) }
+      );
     }
 
     if (unprocessedBugs.length === 0) {
