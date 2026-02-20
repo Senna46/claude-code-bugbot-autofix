@@ -126,7 +126,27 @@ export class BugbotMonitor {
       return null;
     }
 
-    // Second pass: filter out resolved threads (expensive GraphQL call)
+    // Cheap REST call: check if PR is still open before expensive GraphQL
+    const pr = await this.github.getPullRequest(owner, repo, prNumber);
+    if (!pr) {
+      // PR is closed/inaccessible — mark bugs as permanently skipped so
+      // stale FAILED records don't disable the time filter in computeSince().
+      this.state.recordProcessedBugs(
+        candidateComments.map(({ bug: b }) => ({
+          bugId: b.bugId,
+          repo: `${owner}/${repo}`,
+          prNumber,
+        })),
+        "SKIPPED_PR_CLOSED"
+      );
+      logger.debug(
+        `PR #${prNumber} in ${owner}/${repo} is closed/inaccessible, skipping ${candidateComments.length} bug(s).`,
+        { prNumber, repo: `${owner}/${repo}`, bugIds: candidateComments.map(({ bug: b }) => b.bugId) }
+      );
+      return null;
+    }
+
+    // Expensive GraphQL call: filter out resolved threads
     const resolvedIds = await this.github.getResolvedCommentIds(
       owner,
       repo,
@@ -166,25 +186,6 @@ export class BugbotMonitor {
     }
 
     if (unprocessedBugs.length === 0) {
-      return null;
-    }
-
-    const pr = await this.github.getPullRequest(owner, repo, prNumber);
-    if (!pr) {
-      // PR is closed/inaccessible — mark bugs as permanently skipped so
-      // stale FAILED records don't disable the time filter in computeSince().
-      this.state.recordProcessedBugs(
-        unprocessedBugs.map((b) => ({
-          bugId: b.bugId,
-          repo: `${owner}/${repo}`,
-          prNumber,
-        })),
-        "SKIPPED_PR_CLOSED"
-      );
-      logger.debug(
-        `PR #${prNumber} in ${owner}/${repo} is closed/inaccessible, skipping ${unprocessedBugs.length} bug(s).`,
-        { prNumber, repo: `${owner}/${repo}`, bugIds: unprocessedBugs.map((b) => b.bugId) }
-      );
       return null;
     }
 
