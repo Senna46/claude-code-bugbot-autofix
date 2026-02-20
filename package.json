@@ -1,0 +1,37 @@
+{
+  "name": "bugbot-autofix",
+  "version": "0.1.0",
+  "description": "Automatically fix Cursor Bugbot-reported bugs using Claude Code",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/main.js",
+    "dev": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "github",
+    "bugbot",
+    "cursor",
+    "claude-code",
+    "autofix",
+    "automation"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.6.2",
+    "dotenv": "^17.2.4",
+    "octokit": "^5.0.5"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.2.3",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3"
+  }
+}

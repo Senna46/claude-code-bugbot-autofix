@@ -1,0 +1,27 @@
+# Docker Compose for Bugbot Autofix
+# Persists state DB and cloned repos in a named volume.
+#
+# Authentication:
+#   GitHub: Set GH_TOKEN in .env (required on macOS, optional on Linux)
+#   Claude: Set CLAUDE_CODE_OAUTH_TOKEN in .env (required on macOS)
+#           On Linux, file-based auth via volume mount works automatically.
+#
+# To get CLAUDE_CODE_OAUTH_TOKEN, run: claude setup-token
+
+services:
+  autofix:
+    build: .
+    container_name: bugbot-autofix
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - AUTOFIX_WORK_DIR=/data/repos
+      - AUTOFIX_DB_PATH=/data/db/state.db
+    volumes:
+      - autofix-data:/data
+      - ${HOME}/.config/gh:/root/.config/gh:ro
+      - ${HOME}/.claude:/root/.claude
+      - ${HOME}/.claude.json:/root/.claude.json
+
+volumes:
+  autofix-data:
