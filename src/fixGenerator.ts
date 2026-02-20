@@ -1,4 +1,4 @@
-// Fix generation module for Bugbot Autofix.
+// Fix generation module for Claude Code Bugbot Autofix.
 // Clones the target repository locally, checks out the PR head branch,
 // runs claude -p with edit tools to fix detected Cursor Bugbot bugs,
 // then commits and pushes the fix directly to the PR head branch.
@@ -232,7 +232,7 @@ export class FixGenerator {
     await this.execGit(repoDir, ["add", "-A"]);
 
     const bugTitles = bugs.map((b) => `- ${b.title}`).join("\n");
-    const commitMessage = `fix: Bugbot Autofix\n\nFixed Cursor Bugbot issues:\n${bugTitles}`;
+    const commitMessage = `fix: Claude Code Bugbot Autofix\n\nFixed Cursor Bugbot issues:\n${bugTitles}`;
 
     await this.execGit(repoDir, ["commit", "-m", commitMessage]);
 

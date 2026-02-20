@@ -1,4 +1,4 @@
-// GitHub API client for Bugbot Autofix.
+// GitHub API client for Claude Code Bugbot Autofix.
 // Wraps Octokit to provide typed operations for monitoring
 // Cursor Bugbot review comments and managing PRs.
 // Uses gh CLI auth token or GH_TOKEN for authentication.

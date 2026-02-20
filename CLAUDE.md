@@ -4,7 +4,7 @@ Instructions for Claude Code when working on this codebase.
 
 ## Project Overview
 
-Bugbot Autofix is a TypeScript daemon that monitors GitHub PRs for Cursor Bugbot
+Claude Code Bugbot Autofix is a TypeScript daemon that monitors GitHub PRs for Cursor Bugbot
 review comments, parses bug reports, and auto-fixes them using Claude Code
 (claude -p). Fixes are committed directly to the PR head branch.
 

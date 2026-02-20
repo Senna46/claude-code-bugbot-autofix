@@ -1,4 +1,4 @@
-// Data models and type definitions for Bugbot Autofix.
+// Data models and type definitions for Claude Code Bugbot Autofix.
 // Defines shared interfaces for configuration, parsed Cursor Bugbot
 // bug reports, fix results, and PR metadata.
 // Limitations: BugbotBug fields depend on the Cursor Bugbot comment

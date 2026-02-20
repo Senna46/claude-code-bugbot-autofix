@@ -1,4 +1,4 @@
-// SQLite-based state management for Bugbot Autofix.
+// SQLite-based state management for Claude Code Bugbot Autofix.
 // Tracks which Cursor Bugbot bug IDs have been processed
 // to prevent duplicate fix attempts.
 // Limitations: Single-process only; no concurrent access support.

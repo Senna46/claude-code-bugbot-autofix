@@ -1,4 +1,4 @@
-// Main entry point for Bugbot Autofix daemon.
+// Main entry point for Claude Code Bugbot Autofix daemon.
 // Orchestrates the polling loop: discovers Cursor Bugbot reports
 // on open PRs, generates fixes using Claude Code, and commits
 // the fixes directly to the PR head branch.
@@ -37,7 +37,7 @@ class AutofixDaemon {
   // ============================================================
 
   async initialize(): Promise<void> {
-    logger.info("Initializing Bugbot Autofix...");
+    logger.info("Initializing Claude Code Bugbot Autofix...");
     logger.info("Configuration loaded.", {
       orgs: this.config.githubOrgs,
       repos: this.config.githubRepos,
@@ -243,7 +243,7 @@ class AutofixDaemon {
 
     const body =
       `${AUTOFIX_COMMENT_MARKER}\n` +
-      `[Bugbot Autofix](https://github.com/Senna46/claude-code-bugbot-autofix) committed fixes to address ` +
+      `[Claude Code Bugbot Autofix](https://github.com/Senna46/claude-code-bugbot-autofix) committed fixes to address ` +
       `${fixResult.fixedBugs.length} Cursor Bugbot issue(s) ([${commitShort}](${commitUrl})).\n\n` +
       `**Fixed issues:**\n${fixedList}`;
 
@@ -284,7 +284,7 @@ class AutofixDaemon {
 
   private shutdown(): void {
     this.state.close();
-    logger.info("Bugbot Autofix stopped.");
+    logger.info("Claude Code Bugbot Autofix stopped.");
   }
 
   private sleep(ms: number): Promise<void> {

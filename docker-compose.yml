@@ -1,4 +1,4 @@
-# Docker Compose for Bugbot Autofix
+# Docker Compose for Claude Code Bugbot Autofix
 # Persists state DB and cloned repos in a named volume.
 #
 # Authentication:

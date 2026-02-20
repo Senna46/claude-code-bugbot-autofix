@@ -4,7 +4,7 @@ Guidelines for AI agents working on this codebase.
 
 ## Repository Purpose
 
-This is **Bugbot Autofix**, a daemon that automatically fixes bugs reported by
+This is **Claude Code Bugbot Autofix**, a daemon that automatically fixes bugs reported by
 Cursor Bugbot on GitHub PRs using Claude Code. It does NOT detect bugs itself;
 it only reads Cursor Bugbot review comments and generates fixes.
 
