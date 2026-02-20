@@ -17,8 +17,6 @@ export class BugbotMonitor {
   private github: GitHubClient;
   private state: StateStore;
   private config: Config;
-  private lastPollTime: Date | null = null;
-
   constructor(github: GitHubClient, state: StateStore, config: Config) {
     this.github = github;
     this.state = state;
@@ -30,7 +28,6 @@ export class BugbotMonitor {
   // ============================================================
 
   async discoverUnprocessedBugs(): Promise<PrBugReport[]> {
-    const cycleStart = new Date();
     const since = this.computeSince();
 
     const repos = await this.getAllMonitoredRepos();
@@ -51,7 +48,6 @@ export class BugbotMonitor {
       }
     }
 
-    this.lastPollTime = cycleStart;
     return reports;
   }
 
@@ -208,9 +204,6 @@ export class BugbotMonitor {
   // ============================================================
 
   private computeSince(): string {
-    if (this.lastPollTime) {
-      return this.lastPollTime.toISOString();
-    }
     const lookbackMs = DEFAULT_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
     return new Date(Date.now() - lookbackMs).toISOString();
   }

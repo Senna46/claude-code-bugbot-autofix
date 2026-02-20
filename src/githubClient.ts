@@ -268,7 +268,7 @@ export class GitHubClient {
                 }
                 nodes {
                   isResolved
-                  comments(first: 1) {
+                  comments(first: 100) {
                     nodes {
                       databaseId
                     }
@@ -283,12 +283,23 @@ export class GitHubClient {
       const response: GraphQLReviewThreadsResponse =
         await this.octokit.graphql(query);
 
-      const threads =
-        response.repository.pullRequest.reviewThreads;
+      const pullRequest = response.repository.pullRequest;
+      if (!pullRequest) {
+        logger.warn("PR not found via GraphQL, skipping resolved thread check.", {
+          owner,
+          repo,
+          prNumber,
+        });
+        return resolvedIds;
+      }
+
+      const threads = pullRequest.reviewThreads;
 
       for (const thread of threads.nodes) {
-        if (thread.isResolved && thread.comments.nodes.length > 0) {
-          resolvedIds.add(thread.comments.nodes[0].databaseId);
+        if (thread.isResolved) {
+          for (const comment of thread.comments.nodes) {
+            resolvedIds.add(comment.databaseId);
+          }
         }
       }
 
@@ -350,7 +361,7 @@ interface GraphQLReviewThreadsResponse {
           };
         }>;
       };
-    };
+    } | null;
   };
 }
 

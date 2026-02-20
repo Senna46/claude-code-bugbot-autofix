@@ -5,7 +5,7 @@
 // Limitations: Single-threaded; processes PRs sequentially
 //   within each polling cycle. Graceful shutdown on SIGINT/SIGTERM.
 
-import { openSync, closeSync, unlinkSync, writeFileSync } from "fs";
+import { openSync, closeSync, unlinkSync, writeFileSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 
 import { BugbotMonitor } from "./bugbotMonitor.js";
@@ -314,7 +314,6 @@ function acquireLock(dbPath: string): string {
     return lockPath;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-      const { readFileSync, existsSync } = require("fs") as typeof import("fs");
       const existingPid = readFileSync(lockPath, "utf-8").trim();
       throw new Error(
         `Another daemon instance is already running (PID ${existingPid}, lock: ${lockPath}). ` +
@@ -351,6 +350,7 @@ async function main(): Promise<void> {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[FATAL] ${message}`);
+    if (lockPath) releaseLock(lockPath);
     process.exit(1);
   } finally {
     if (lockPath) releaseLock(lockPath);
