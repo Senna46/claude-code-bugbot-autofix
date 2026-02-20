@@ -28,15 +28,14 @@ export class BugbotMonitor {
   // ============================================================
 
   async discoverUnprocessedBugs(): Promise<PrBugReport[]> {
-    const since = this.computeSince();
-
     const repos = await this.getAllMonitoredRepos();
-    logger.info(`Scanning ${repos.length} repo(s) for cursor[bot] comments${since ? ` since ${since}` : ""}.`);
+    logger.info(`Scanning ${repos.length} repo(s) for cursor[bot] comments.`);
 
     const reports: PrBugReport[] = [];
 
     for (const { owner, repo } of repos) {
       try {
+        const since = this.computeSinceForRepo(`${owner}/${repo}`);
         const repoReports = await this.scanRepoForBugs(owner, repo, since);
         reports.push(...repoReports);
       } catch (error) {
@@ -246,9 +245,9 @@ export class BugbotMonitor {
   // Compute the "since" timestamp for the API query
   // ============================================================
 
-  private computeSince(): string | undefined {
-    if (this.state.hasFailedBugs()) {
-      logger.debug("Skipping since filter to retry failed bugs.");
+  private computeSinceForRepo(repo: string): string | undefined {
+    if (this.state.hasFailedBugsForRepo(repo)) {
+      logger.debug("Skipping since filter to retry failed bugs.", { repo });
       return undefined;
     }
     const lookbackMs = DEFAULT_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;

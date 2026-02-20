@@ -342,10 +342,17 @@ function acquireLock(dbPath: string): string {
       }
 
       // Stale lock file from a crashed process — reclaim it
-      unlinkSync(lockPath);
-      const fd = openSync(lockPath, "wx");
-      writeFileSync(fd, String(process.pid));
-      closeSync(fd);
+      try {
+        unlinkSync(lockPath);
+        const fd = openSync(lockPath, "wx");
+        writeFileSync(fd, String(process.pid));
+        closeSync(fd);
+      } catch {
+        throw new Error(
+          `Another daemon instance is already running (lock: ${lockPath}). ` +
+            "Stop the existing instance first."
+        );
+      }
       return lockPath;
     }
     throw error;

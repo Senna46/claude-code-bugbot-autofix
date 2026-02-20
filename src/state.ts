@@ -63,6 +63,15 @@ export class StateStore {
     return row !== undefined;
   }
 
+  hasFailedBugsForRepo(repo: string): boolean {
+    const row = this.db
+      .prepare(
+        "SELECT 1 FROM processed_bugs WHERE fix_commit_sha = 'FAILED' AND repo = ? LIMIT 1"
+      )
+      .get(repo);
+    return row !== undefined;
+  }
+
   recordProcessedBug(
     bugId: string,
     repo: string,
