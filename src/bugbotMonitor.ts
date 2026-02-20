@@ -143,6 +143,20 @@ export class BugbotMonitor {
 
     const pr = await this.github.getPullRequest(owner, repo, prNumber);
     if (!pr) {
+      // PR is closed/inaccessible — mark bugs as permanently skipped so
+      // stale FAILED records don't disable the time filter in computeSince().
+      this.state.recordProcessedBugs(
+        unprocessedBugs.map((b) => ({
+          bugId: b.bugId,
+          repo: `${owner}/${repo}`,
+          prNumber,
+        })),
+        "SKIPPED_PR_CLOSED"
+      );
+      logger.debug(
+        `PR #${prNumber} in ${owner}/${repo} is closed/inaccessible, skipping ${unprocessedBugs.length} bug(s).`,
+        { prNumber, repo: `${owner}/${repo}`, bugIds: unprocessedBugs.map((b) => b.bugId) }
+      );
       return null;
     }
 
