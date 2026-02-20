@@ -63,37 +63,6 @@ export class GitHubClient {
     }
   }
 
-  // ============================================================
-  // Pull Requests
-  // ============================================================
-
-  async listOpenPullRequests(
-    owner: string,
-    repo: string
-  ): Promise<PullRequest[]> {
-    logger.debug("Listing open PRs.", { owner, repo });
-
-    const { data } = await this.octokit.rest.pulls.list({
-      owner,
-      repo,
-      state: "open",
-      sort: "updated",
-      direction: "desc",
-      per_page: 100,
-    });
-
-    return data.map((pr) => ({
-      owner,
-      repo,
-      number: pr.number,
-      title: pr.title,
-      headRef: pr.head.ref,
-      baseRef: pr.base.ref,
-      headSha: pr.head.sha,
-      htmlUrl: pr.html_url,
-    }));
-  }
-
   async listOwnerRepos(
     owner: string
   ): Promise<Array<{ owner: string; name: string }>> {

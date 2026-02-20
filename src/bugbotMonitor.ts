@@ -31,7 +31,7 @@ export class BugbotMonitor {
     const since = this.computeSince();
 
     const repos = await this.getAllMonitoredRepos();
-    logger.info(`Scanning ${repos.length} repo(s) for cursor[bot] comments since ${since}.`);
+    logger.info(`Scanning ${repos.length} repo(s) for cursor[bot] comments${since ? ` since ${since}` : ""}.`);
 
     const reports: PrBugReport[] = [];
 
@@ -58,7 +58,7 @@ export class BugbotMonitor {
   private async scanRepoForBugs(
     owner: string,
     repo: string,
-    since: string
+    since: string | undefined
   ): Promise<PrBugReport[]> {
     const commentsByPr = await this.github.listRepoBugbotComments(
       owner,
@@ -203,7 +203,11 @@ export class BugbotMonitor {
   // Compute the "since" timestamp for the API query
   // ============================================================
 
-  private computeSince(): string {
+  private computeSince(): string | undefined {
+    if (this.state.hasFailedBugs()) {
+      logger.debug("Skipping since filter to retry failed bugs.");
+      return undefined;
+    }
     const lookbackMs = DEFAULT_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;
     return new Date(Date.now() - lookbackMs).toISOString();
   }

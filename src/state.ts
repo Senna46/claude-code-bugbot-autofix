@@ -48,8 +48,18 @@ export class StateStore {
 
   isBugProcessed(bugId: string): boolean {
     const row = this.db
-      .prepare("SELECT 1 FROM processed_bugs WHERE bug_id = ?")
-      .get(bugId);
+      .prepare("SELECT fix_commit_sha FROM processed_bugs WHERE bug_id = ?")
+      .get(bugId) as { fix_commit_sha: string | null } | undefined;
+    // Bugs marked as FAILED should be retried
+    return row !== undefined && row.fix_commit_sha !== "FAILED";
+  }
+
+  hasFailedBugs(): boolean {
+    const row = this.db
+      .prepare(
+        "SELECT 1 FROM processed_bugs WHERE fix_commit_sha = 'FAILED' LIMIT 1"
+      )
+      .get();
     return row !== undefined;
   }
 

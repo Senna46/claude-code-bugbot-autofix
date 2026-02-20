@@ -5,7 +5,7 @@
 // Limitations: Single-threaded; processes PRs sequentially
 //   within each polling cycle. Graceful shutdown on SIGINT/SIGTERM.
 
-import { openSync, closeSync, unlinkSync, writeFileSync, readFileSync } from "fs";
+import { mkdirSync, openSync, closeSync, unlinkSync, writeFileSync, readFileSync } from "fs";
 import { dirname, join } from "path";
 
 import { BugbotMonitor } from "./bugbotMonitor.js";
@@ -223,6 +223,14 @@ class AutofixDaemon {
         `Error processing PR #${pr.number} in ${repoFullName}. Bugs will be retried next cycle.`,
         { error: message, prNumber: pr.number, repo: repoFullName }
       );
+      this.state.recordProcessedBugs(
+        bugs.map((b) => ({
+          bugId: b.bugId,
+          repo: repoFullName,
+          prNumber: pr.number,
+        })),
+        "FAILED"
+      );
     }
   }
 
@@ -342,6 +350,7 @@ async function main(): Promise<void> {
     const config = loadConfig();
     setLogLevel(config.logLevel);
 
+    mkdirSync(dirname(config.dbPath), { recursive: true });
     lockPath = acquireLock(config.dbPath);
 
     const daemon = new AutofixDaemon(config);
