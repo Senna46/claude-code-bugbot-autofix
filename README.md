@@ -1,0 +1,194 @@
+# Bugbot Autofix
+
+Automatically fix [Cursor Bugbot](https://cursor.com/dashboard?tab=bugbot)-reported bugs using [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
+
+Monitors open pull requests for Cursor Bugbot review comments, parses bug reports, generates fixes via `claude -p`, and commits them directly to the PR head branch. A cost-effective alternative to Cursor's built-in Autofix.
+
+## Features
+
+- **Cursor Bugbot monitoring**: Polls GitHub for open PRs and detects `cursor[bot]` review comments with `BUGBOT_BUG_ID` markers
+- **Automatic bug parsing**: Extracts title, severity, description, file path, and line numbers from Bugbot's structured comment format
+- **Claude Code fix generation**: Runs `claude -p` with Edit tools to fix detected bugs in cloned repositories
+- **Direct commit to PR**: Pushes fixes directly to the PR head branch (no separate fix branch or approval workflow)
+- **Duplicate prevention**: SQLite-based state tracking ensures each bug ID is processed only once
+- **Fix summary comments**: Posts a summary comment on the PR listing all fixed issues with commit link
+- **Organization-wide monitoring**: Scans all repos under configured GitHub organizations
+- **Docker support**: Production-ready Dockerfile and docker-compose.yml
+
+## Prerequisites
+
+- **`gh` CLI**: Authenticated with GitHub (`gh auth status`)
+- **`claude` CLI**: Authenticated Claude Code (`claude --version`)
+- **`git`**: For repository operations
+- **Node.js** >= 18.0.0 (for local installation) or **Docker** (for containerized deployment)
+
+## Authentication Setup
+
+### GitHub Authentication
+
+| Environment             | Method                                                                                          |
+| ----------------------- | ----------------------------------------------------------------------------------------------- |
+| **Local (Linux/macOS)** | Run `gh auth login`                                                                             |
+| **Docker on Linux**     | Auto-mounted via `docker-compose.yml` volume (`~/.config/gh:/root/.config/gh:ro`)               |
+| **Docker on macOS**     | Set `GH_TOKEN` in `.env` (macOS Keychain is inaccessible from containers)                       |
+
+To obtain `GH_TOKEN`:
+
+```bash
+gh auth token
+```
+
+### Claude Code Authentication
+
+#### Option 1: OAuth Token (`CLAUDE_CODE_OAUTH_TOKEN`) -- for Pro/Max/Team plan
+
+```bash
+claude setup-token
+```
+
+| Environment         | Method                                                                                    |
+| ------------------- | ----------------------------------------------------------------------------------------- |
+| **Local (Linux)**   | Not needed -- credentials stored in `~/.claude/.credentials.json` after `claude login`    |
+| **Local (macOS)**   | Not needed -- credentials stored in macOS Keychain after `claude login`                   |
+| **Docker on Linux** | Auto-mounted via `docker-compose.yml` volume (`~/.claude:/root/.claude`)                  |
+| **Docker on macOS** | Set `CLAUDE_CODE_OAUTH_TOKEN` in `.env`                                                   |
+
+#### Option 2: API Key (`ANTHROPIC_API_KEY`) -- for pay-as-you-go billing
+
+1. Create an API key at [console.anthropic.com](https://console.anthropic.com/)
+2. Set `ANTHROPIC_API_KEY` in `.env`
+
+## Quick Start
+
+### Local Installation
+
+```bash
+git clone https://github.com/Senna46/claude-code-bugbot-autofix.git
+cd claude-code-bugbot-autofix
+
+npm install
+
+cp .env.example .env
+# Edit .env: set AUTOFIX_GITHUB_ORGS or AUTOFIX_GITHUB_REPOS
+
+npm run build
+npm start
+
+# Or run in development mode
+npm run dev
+```
+
+### Docker
+
+```bash
+git clone https://github.com/Senna46/claude-code-bugbot-autofix.git
+cd claude-code-bugbot-autofix
+
+cp .env.example .env
+# Edit .env with your settings
+
+# Prevent Docker from creating ~/.claude.json as a directory
+touch ~/.claude.json
+
+# macOS only: add auth tokens to .env
+# gh auth token            -> set GH_TOKEN
+# claude setup-token       -> set CLAUDE_CODE_OAUTH_TOKEN
+
+docker compose build
+docker compose up -d
+
+# View logs
+docker compose logs -f
+```
+
+## Configuration
+
+Copy `.env.example` to `.env` and configure:
+
+### Target Repositories
+
+| Variable               | Required | Default | Description                                               |
+| ---------------------- | -------- | ------- | --------------------------------------------------------- |
+| `AUTOFIX_GITHUB_ORGS`  | Yes\*    | --      | GitHub owners to monitor: users or orgs (comma-separated) |
+| `AUTOFIX_GITHUB_REPOS` | Yes\*    | --      | Specific repos to monitor (`owner/repo`, comma-separated) |
+
+\* At least one of `AUTOFIX_GITHUB_ORGS` or `AUTOFIX_GITHUB_REPOS` must be set.
+
+### Behavior
+
+| Variable               | Required | Default                     | Description                        |
+| ---------------------- | -------- | --------------------------- | ---------------------------------- |
+| `AUTOFIX_POLL_INTERVAL`| No       | `120`                       | Polling interval in seconds        |
+| `AUTOFIX_WORK_DIR`     | No       | `~/.bugbot-autofix/repos`   | Directory for cloning repositories |
+| `AUTOFIX_DB_PATH`      | No       | `~/.bugbot-autofix/state.db`| SQLite database path               |
+| `AUTOFIX_CLAUDE_MODEL` | No       | CLI default                 | Claude model to use                |
+| `AUTOFIX_LOG_LEVEL`    | No       | `info`                      | Log level (debug/info/warn/error)  |
+
+### Authentication (Docker / Environment Variables)
+
+| Variable                  | Required          | Description                                 |
+| ------------------------- | ----------------- | ------------------------------------------- |
+| `GH_TOKEN`                | macOS Docker only | GitHub token (`gh auth token`)              |
+| `CLAUDE_CODE_OAUTH_TOKEN` | macOS Docker only | Claude OAuth token (`claude setup-token`)   |
+| `ANTHROPIC_API_KEY`       | Alternative       | Anthropic API key for pay-as-you-go billing |
+
+## Architecture
+
+```mermaid
+flowchart TD
+    Start[Polling Loop] --> ListPRs[List open PRs in monitored repos/orgs]
+    ListPRs --> FetchComments["Fetch review comments from cursor[bot]"]
+    FetchComments --> Parse[Parse bug details from BUGBOT_BUG_ID comments]
+    Parse --> Filter[Filter out already-processed bugs via SQLite]
+    Filter --> HasBugs{Unprocessed bugs?}
+    HasBugs -->|No| Sleep[Sleep poll interval]
+    HasBugs -->|Yes| Clone[Clone/fetch repo, checkout PR head branch]
+    Clone --> Claude["Run claude -p with Edit tools"]
+    Claude --> Changes{Changes made?}
+    Changes -->|No| Record[Record bugs as processed]
+    Changes -->|Yes| Commit[git add + commit + push to PR head]
+    Commit --> PostComment[Post fix summary comment on PR]
+    PostComment --> Record
+    Record --> Sleep
+    Sleep --> Start
+```
+
+### Module Overview
+
+| Module             | Responsibility                                                           |
+| ------------------ | ------------------------------------------------------------------------ |
+| `main.ts`          | `AutofixDaemon` polling loop, graceful shutdown, fix comment posting     |
+| `config.ts`        | Loads and validates `AUTOFIX_*` environment variables                    |
+| `bugbotMonitor.ts` | Discovers unprocessed Bugbot bugs across all monitored PRs              |
+| `bugParser.ts`     | Parses `cursor[bot]` comment bodies into structured `BugbotBug` objects |
+| `fixGenerator.ts`  | Clones repos, runs `claude -p`, commits and pushes fixes                |
+| `githubClient.ts`  | Octokit wrapper for PR listing, review comments, and issue comments     |
+| `state.ts`         | SQLite tracking of processed bug IDs to prevent duplicates              |
+| `types.ts`         | Shared TypeScript interfaces                                            |
+| `logger.ts`        | Structured logging with configurable levels                             |
+
+## Running as a Service
+
+### Docker (recommended)
+
+```bash
+docker compose up -d
+```
+
+Management commands:
+
+```bash
+docker compose ps          # Check status
+docker compose logs -f     # View logs
+docker compose restart     # Restart
+docker compose down        # Stop
+docker compose down -v     # Remove with data
+```
+
+## Related Projects
+
+- [Claude Code BugHunter](https://github.com/Senna46/claude-code-bughunter) -- Self-hosted PR bug detection agent (detection + fix)
+
+## License
+
+MIT
