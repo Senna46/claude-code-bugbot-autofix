@@ -248,7 +248,7 @@ class AutofixDaemon {
     const fixedList = fixResult.fixedBugs
       .map(
         (fb) =>
-          `- ✅ Fixed: **${fb.title}**\n  - ${fb.description}`
+          `- ✅ Fixed: **${fb.title}**\n  - ${fb.fixDescription ?? fb.description}`
       )
       .join("\n");
 
