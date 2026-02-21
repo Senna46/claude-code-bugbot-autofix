@@ -12,7 +12,7 @@ import { execFile, spawn } from "child_process";
 import { existsSync } from "fs";
 import { readFile } from "fs/promises";
 import { mkdir } from "fs/promises";
-import { dirname, join } from "path";
+import { dirname, join, resolve as pathResolve } from "path";
 import { promisify } from "util";
 
 import { logger } from "./logger.js";
@@ -43,6 +43,10 @@ const ALLOWED_TOOLS = [
 ].join(",");
 
 const COMMIT_MSG_PREFIX = "COMMIT_MSG: ";
+
+const CLAUDE_TIMEOUT_MS = 10 * 60 * 1000;
+const SIGKILL_GRACE_MS = 5_000;
+const MAX_STDOUT_SIZE = 100_000;
 
 const execFileAsync = promisify(execFile);
 
@@ -302,24 +306,55 @@ export class FixGenerator {
     });
 
     return new Promise<string>((resolve, reject) => {
+      let settled = false;
+
       const child = spawn("claude", args, {
         cwd: repoDir,
         stdio: ["pipe", "pipe", "pipe"],
-        timeout: 10 * 60 * 1000,
       });
 
       let stdout = "";
       let stderr = "";
 
+      const killTimer = setTimeout(() => {
+        if (settled) return;
+        logger.warn("claude -p timed out, sending SIGTERM.", {
+          timeoutMs: CLAUDE_TIMEOUT_MS,
+        });
+        child.kill("SIGTERM");
+        setTimeout(() => {
+          if (settled) return;
+          logger.warn(
+            "claude -p did not exit after SIGTERM, sending SIGKILL."
+          );
+          child.kill("SIGKILL");
+        }, SIGKILL_GRACE_MS);
+      }, CLAUDE_TIMEOUT_MS);
+
       child.stdout.on("data", (data: Buffer) => {
         stdout += data.toString();
+        if (stdout.length > MAX_STDOUT_SIZE) {
+          stdout = stdout.substring(stdout.length - MAX_STDOUT_SIZE);
+        }
       });
 
       child.stderr.on("data", (data: Buffer) => {
         stderr += data.toString();
       });
 
-      child.on("close", (code) => {
+      child.on("close", (code, signal) => {
+        clearTimeout(killTimer);
+        if (settled) return;
+        settled = true;
+
+        if (signal === "SIGTERM" || signal === "SIGKILL") {
+          reject(
+            new Error(
+              `claude -p fix generation timed out after ${CLAUDE_TIMEOUT_MS / 1000}s. stderr: ${stderr.substring(0, 500)}`
+            )
+          );
+          return;
+        }
         if (code !== 0) {
           reject(
             new Error(
@@ -332,6 +367,9 @@ export class FixGenerator {
       });
 
       child.on("error", (error) => {
+        clearTimeout(killTimer);
+        if (settled) return;
+        settled = true;
         reject(
           new Error(`claude -p fix generation failed: ${error.message}`)
         );
@@ -443,7 +481,9 @@ export class FixGenerator {
     const importedPaths = new Set<string>();
 
     for (const bugFilePath of bugFilePaths) {
-      const absolutePath = join(repoDir, bugFilePath);
+      const absolutePath = safeResolvePath(repoDir, bugFilePath);
+      if (!absolutePath) continue;
+
       try {
         const content = await readFile(absolutePath, "utf-8");
         const imports = extractImportPaths(content);
@@ -472,7 +512,9 @@ export class FixGenerator {
     for (const filePath of importedPaths) {
       if (totalSize >= MAX_RELATED_CONTEXT_SIZE) break;
 
-      const absolutePath = join(repoDir, filePath);
+      const absolutePath = safeResolvePath(repoDir, filePath);
+      if (!absolutePath) continue;
+
       try {
         const content = await readFile(absolutePath, "utf-8");
         const remainingBudget = MAX_RELATED_CONTEXT_SIZE - totalSize;
@@ -509,6 +551,8 @@ export class FixGenerator {
     if (!importPath.startsWith(".")) return null;
 
     const resolvedRelative = join(fromDir, importPath);
+
+    if (!safeResolvePath(repoDir, resolvedRelative)) return null;
 
     const extensions = ["", ".ts", ".tsx", ".js", ".jsx", ".mts", ".mjs"];
     for (const ext of extensions) {
@@ -593,7 +637,9 @@ export class FixGenerator {
         break;
       }
 
-      const absolutePath = join(repoDir, filePath);
+      const absolutePath = safeResolvePath(repoDir, filePath);
+      if (!absolutePath) continue;
+
       try {
         const content = await readFile(absolutePath, "utf-8");
         const remainingBudget = MAX_FILE_CONTEXT_SIZE - totalSize;
@@ -714,6 +760,26 @@ function extractImportPaths(source: string): string[] {
   }
 
   return paths;
+}
+
+// ============================================================
+// Utility: safe path resolution with traversal prevention
+// ============================================================
+
+function safeResolvePath(
+  baseDir: string,
+  relativePath: string
+): string | null {
+  const resolved = pathResolve(baseDir, relativePath);
+  if (!resolved.startsWith(baseDir + "/") && resolved !== baseDir) {
+    logger.warn("Path traversal attempt blocked.", {
+      baseDir,
+      relativePath,
+      resolved,
+    });
+    return null;
+  }
+  return resolved;
 }
 
 // ============================================================
