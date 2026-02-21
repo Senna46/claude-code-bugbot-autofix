@@ -1,6 +1,6 @@
 // Fix generation module for Claude Code Bugbot Autofix.
 // Clones the target repository locally, checks out the PR head branch,
-// runs claude -p with edit tools to fix detected Cursor Bugbot bugs,
+// runs claude -p with edit and exploration tools to fix detected Cursor Bugbot bugs,
 // then commits and pushes the fix directly to the PR head branch.
 // Includes PR diff and changed file contents as context for better fixes.
 // Limitations: Requires git CLI with push access to the target repo.
@@ -19,6 +19,22 @@ import type { BugbotBug, Config, FixResult, PullRequest } from "./types.js";
 
 const MAX_DIFF_SIZE = 100_000;
 const MAX_FILE_CONTEXT_SIZE = 200_000;
+
+const ALLOWED_TOOLS = [
+  "Read",
+  "Edit",
+  "Bash(git diff *)",
+  "Bash(git status *)",
+  "Bash(find *)",
+  "Bash(grep *)",
+  "Bash(rg *)",
+  "Bash(ls *)",
+  "Bash(cat *)",
+  "Bash(head *)",
+  "Bash(tail *)",
+  "Bash(wc *)",
+  "Bash(tree *)",
+].join(",");
 
 const execFileAsync = promisify(execFile);
 
@@ -53,7 +69,13 @@ export class FixGenerator {
         prDiff
       );
 
-      await this.runClaudeFix(repoDir, bugs, prDiff, changedFileContents);
+      const prompt = this.buildFixPrompt(
+        bugs,
+        prDiff,
+        changedFileContents
+      );
+
+      await this.runClaudeFix(repoDir, prompt, bugs.length);
 
       const hasChanges = await this.hasUncommittedChanges(repoDir);
       if (!hasChanges) {
@@ -148,15 +170,20 @@ export class FixGenerator {
   }
 
   // ============================================================
-  // Run claude -p for fixing bugs
+  // Build the fix prompt with all context sections
   // ============================================================
 
-  private async runClaudeFix(
-    repoDir: string,
+  private buildFixPrompt(
     bugs: BugbotBug[],
     prDiff: string,
     changedFileContents: Map<string, string>
-  ): Promise<void> {
+  ): string {
+    const sections: string[] = [];
+
+    sections.push(
+      "You are fixing bugs reported by Cursor Bugbot in this codebase."
+    );
+
     const bugDescriptions = bugs
       .map(
         (bug, idx) =>
@@ -165,47 +192,60 @@ export class FixGenerator {
           `   Description: ${bug.description}`
       )
       .join("\n\n");
+    sections.push(`## Bugs to fix\n\n${bugDescriptions}`);
 
-    let fileContentsSection = "";
-    if (changedFileContents.size > 0) {
-      const entries = [...changedFileContents.entries()]
-        .map(([path, content]) => `--- ${path} ---\n${content}`)
-        .join("\n\n");
-      fileContentsSection =
-        "\n\n## Current contents of changed files\n\n" + entries;
-    }
-
-    let diffSection = "";
     if (prDiff) {
       const truncatedDiff =
         prDiff.length > MAX_DIFF_SIZE
           ? prDiff.substring(0, MAX_DIFF_SIZE) + "\n... (diff truncated)"
           : prDiff;
-      diffSection = "\n\n## PR diff\n\n```diff\n" + truncatedDiff + "\n```";
+      sections.push(
+        `## PR diff\n\n\`\`\`diff\n${truncatedDiff}\n\`\`\``
+      );
     }
 
-    const prompt =
-      "Fix the following bugs reported by Cursor Bugbot in this codebase. " +
-      "Make minimal, targeted changes that address only the identified issues. " +
-      "Do not refactor unrelated code or change formatting.\n\n" +
-      `## Bugs to fix\n\n${bugDescriptions}` +
-      diffSection +
-      fileContentsSection +
-      "\n\nFor each bug, make the necessary code changes to fix it. " +
-      "Commit messages are not needed - just make the file changes.";
+    if (changedFileContents.size > 0) {
+      const entries = [...changedFileContents.entries()]
+        .map(([path, content]) => `--- ${path} ---\n${content}`)
+        .join("\n\n");
+      sections.push(
+        `## Current contents of changed files\n\n${entries}`
+      );
+    }
 
-    const args = [
-      "-p",
-      "--allowedTools",
-      "Read,Edit,Bash(git diff *),Bash(git status *)",
-    ];
+    sections.push(
+      "## Instructions\n\n" +
+        "Before making changes, use the available tools (Read, grep, find, ls, tree) to explore the " +
+        "codebase and understand how the target files interact with the rest of the project.\n\n" +
+        "Fix the identified bugs by making correct, targeted changes. Follow these rules:\n" +
+        "- Do NOT create new files. Only modify existing files.\n" +
+        "- Focus changes on the files mentioned in the bug reports. Only modify other files if strictly " +
+        "necessary for the fix.\n" +
+        "- Follow the existing code style, naming conventions, and patterns in the project.\n" +
+        "- Ensure your changes are compatible with the rest of the codebase.\n" +
+        "- Commit messages are not needed - just make the file changes."
+    );
+
+    return sections.join("\n\n");
+  }
+
+  // ============================================================
+  // Run claude -p for fixing bugs
+  // ============================================================
+
+  private async runClaudeFix(
+    repoDir: string,
+    prompt: string,
+    bugCount: number
+  ): Promise<void> {
+    const args = ["-p", "--allowedTools", ALLOWED_TOOLS];
 
     if (this.config.claudeModel) {
       args.push("--model", this.config.claudeModel);
     }
 
     logger.info("Running claude -p for fix generation...", {
-      bugCount: bugs.length,
+      bugCount,
       repoDir,
     });
 
@@ -289,11 +329,14 @@ export class FixGenerator {
 
     for (const filePath of filePaths) {
       if (totalSize >= MAX_FILE_CONTEXT_SIZE) {
-        logger.debug("File context size limit reached, skipping remaining files.", {
-          totalSize,
-          limit: MAX_FILE_CONTEXT_SIZE,
-          skippedFile: filePath,
-        });
+        logger.debug(
+          "File context size limit reached, skipping remaining files.",
+          {
+            totalSize,
+            limit: MAX_FILE_CONTEXT_SIZE,
+            skippedFile: filePath,
+          }
+        );
         break;
       }
 
@@ -302,7 +345,10 @@ export class FixGenerator {
         const content = await readFile(absolutePath, "utf-8");
         const remainingBudget = MAX_FILE_CONTEXT_SIZE - totalSize;
         if (content.length > remainingBudget) {
-          contents.set(filePath, content.substring(0, remainingBudget) + "\n... (truncated)");
+          contents.set(
+            filePath,
+            content.substring(0, remainingBudget) + "\n... (truncated)"
+          );
           totalSize = MAX_FILE_CONTEXT_SIZE;
         } else {
           contents.set(filePath, content);
