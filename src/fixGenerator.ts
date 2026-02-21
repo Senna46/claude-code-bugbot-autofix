@@ -232,6 +232,7 @@ export class FixGenerator {
       .map(
         (bug, idx) =>
           `${idx + 1}. [${bug.severity.toUpperCase()}] ${bug.title}\n` +
+          `   Bug ID: ${bug.bugId}\n` +
           `   File: ${bug.filePath}${
             bug.startLine ? `#L${bug.startLine}` : ""
           }${bug.endLine ? `-L${bug.endLine}` : ""}\n` +
