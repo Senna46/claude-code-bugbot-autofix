@@ -43,6 +43,7 @@ const ALLOWED_TOOLS = [
 ].join(",");
 
 const COMMIT_MSG_PREFIX = "COMMIT_MSG: ";
+const FIX_DETAIL_PREFIX = "FIX_DETAIL: ";
 
 const CLAUDE_TIMEOUT_MS = 10 * 60 * 1000;
 const SIGKILL_GRACE_MS = 5_000;
@@ -117,10 +118,12 @@ export class FixGenerator {
         commitSummary
       );
 
+      const fixDetails = parseFixDetails(claudeOutput);
       const fixedBugs = bugs.map((bug) => ({
         bugId: bug.bugId,
         title: bug.title,
         description: bug.description,
+        fixDescription: fixDetails.get(bug.bugId) ?? null,
       }));
 
       logger.info("Fix generation complete.", {
@@ -186,11 +189,7 @@ export class FixGenerator {
 
     try {
       await this.execGit(repoDir, ["checkout", pr.headRef]);
-      await this.execGit(repoDir, [
-        "reset",
-        "--hard",
-        `origin/${pr.headRef}`,
-      ]);
+      await this.execGit(repoDir, ["reset", "--hard", `origin/${pr.headRef}`]);
     } catch {
       await this.execGit(repoDir, [
         "checkout",
@@ -233,7 +232,9 @@ export class FixGenerator {
       .map(
         (bug, idx) =>
           `${idx + 1}. [${bug.severity.toUpperCase()}] ${bug.title}\n` +
-          `   File: ${bug.filePath}${bug.startLine ? `#L${bug.startLine}` : ""}${bug.endLine ? `-L${bug.endLine}` : ""}\n` +
+          `   File: ${bug.filePath}${
+            bug.startLine ? `#L${bug.startLine}` : ""
+          }${bug.endLine ? `-L${bug.endLine}` : ""}\n` +
           `   Description: ${bug.description}`
       )
       .join("\n\n");
@@ -244,18 +245,14 @@ export class FixGenerator {
         prDiff.length > MAX_DIFF_SIZE
           ? prDiff.substring(0, MAX_DIFF_SIZE) + "\n... (diff truncated)"
           : prDiff;
-      sections.push(
-        `## PR diff\n\n\`\`\`diff\n${truncatedDiff}\n\`\`\``
-      );
+      sections.push(`## PR diff\n\n\`\`\`diff\n${truncatedDiff}\n\`\`\``);
     }
 
     if (changedFileContents.size > 0) {
       const entries = [...changedFileContents.entries()]
         .map(([path, content]) => `--- ${path} ---\n${content}`)
         .join("\n\n");
-      sections.push(
-        `## Current contents of changed files\n\n${entries}`
-      );
+      sections.push(`## Current contents of changed files\n\n${entries}`);
     }
 
     if (relatedFileContents.size > 0) {
@@ -278,8 +275,11 @@ export class FixGenerator {
         "- Follow the existing code style, naming conventions, and patterns in the project.\n" +
         "- Ensure your changes are compatible with the rest of the codebase.\n" +
         "- Commit messages are not needed - just make the file changes.\n\n" +
-        "After making all changes, output exactly one line in the following format:\n" +
-        `${COMMIT_MSG_PREFIX}<a concise summary of what was fixed>`
+        "After making all changes, output the following lines:\n\n" +
+        "1. One summary line:\n" +
+        `${COMMIT_MSG_PREFIX}<a concise summary of what was fixed>\n\n` +
+        "2. For each bug fixed, one detail line describing the actual change you made (not the bug description):\n" +
+        `${FIX_DETAIL_PREFIX}<bug_id> | <brief description of the code change applied>`
     );
 
     return sections.join("\n\n");
@@ -324,9 +324,7 @@ export class FixGenerator {
         child.kill("SIGTERM");
         setTimeout(() => {
           if (settled) return;
-          logger.warn(
-            "claude -p did not exit after SIGTERM, sending SIGKILL."
-          );
+          logger.warn("claude -p did not exit after SIGTERM, sending SIGKILL.");
           child.kill("SIGKILL");
         }, SIGKILL_GRACE_MS);
       }, CLAUDE_TIMEOUT_MS);
@@ -350,7 +348,9 @@ export class FixGenerator {
         if (signal === "SIGTERM" || signal === "SIGKILL") {
           reject(
             new Error(
-              `claude -p fix generation timed out after ${CLAUDE_TIMEOUT_MS / 1000}s. stderr: ${stderr.substring(0, 500)}`
+              `claude -p fix generation timed out after ${
+                CLAUDE_TIMEOUT_MS / 1000
+              }s. stderr: ${stderr.substring(0, 500)}`
             )
           );
           return;
@@ -358,7 +358,10 @@ export class FixGenerator {
         if (code !== 0) {
           reject(
             new Error(
-              `claude -p fix generation exited with code ${code}. stderr: ${stderr.substring(0, 500)}`
+              `claude -p fix generation exited with code ${code}. stderr: ${stderr.substring(
+                0,
+                500
+              )}`
             )
           );
           return;
@@ -370,9 +373,7 @@ export class FixGenerator {
         clearTimeout(killTimer);
         if (settled) return;
         settled = true;
-        reject(
-          new Error(`claude -p fix generation failed: ${error.message}`)
-        );
+        reject(new Error(`claude -p fix generation failed: ${error.message}`));
       });
 
       child.stdin.write(prompt);
@@ -398,8 +399,7 @@ export class FixGenerator {
       );
       if (stdout.length > MAX_PROJECT_STRUCTURE_SIZE) {
         return (
-          stdout.substring(0, MAX_PROJECT_STRUCTURE_SIZE) +
-          "\n... (truncated)"
+          stdout.substring(0, MAX_PROJECT_STRUCTURE_SIZE) + "\n... (truncated)"
         );
       }
       return stdout;
@@ -453,8 +453,7 @@ export class FixGenerator {
         if (!existsSync(filePath)) continue;
         let content = await readFile(filePath, "utf-8");
         if (content.length > MAX_DOC_SIZE) {
-          content =
-            content.substring(0, MAX_DOC_SIZE) + "\n... (truncated)";
+          content = content.substring(0, MAX_DOC_SIZE) + "\n... (truncated)";
         }
         sections.push(`### ${fileName}\n\n${content}`);
         logger.debug(`Loaded project documentation: ${fileName}`, {
@@ -590,10 +589,7 @@ export class FixGenerator {
   // PR context: diff and changed file contents
   // ============================================================
 
-  private async getPrDiff(
-    repoDir: string,
-    pr: PullRequest
-  ): Promise<string> {
+  private async getPrDiff(repoDir: string, pr: PullRequest): Promise<string> {
     try {
       const diff = await this.execGit(repoDir, [
         "diff",
@@ -688,17 +684,15 @@ export class FixGenerator {
     const title = commitSummary
       ? `fix: ${commitSummary}`
       : bugs.length === 1
-        ? `fix: ${bugs[0].title}`
-        : "fix: Fix Cursor Bugbot issues";
+      ? `fix: ${bugs[0].title}`
+      : "fix: Fix Cursor Bugbot issues";
 
     const bugTitles = bugs.map((b) => `- ${b.title}`).join("\n");
     const commitMessage = `${title}\n\n${bugTitles}\n\nApplied via Claude Code Bugbot Autofix`;
 
     await this.execGit(repoDir, ["commit", "-m", commitMessage]);
 
-    const sha = (
-      await this.execGit(repoDir, ["rev-parse", "HEAD"])
-    ).trim();
+    const sha = (await this.execGit(repoDir, ["rev-parse", "HEAD"])).trim();
 
     await this.execGit(repoDir, ["push", "origin", branchName]);
 
@@ -766,13 +760,13 @@ function extractImportPaths(source: string): string[] {
 // Utility: safe path resolution with traversal prevention
 // ============================================================
 
-function safeResolvePath(
-  baseDir: string,
-  relativePath: string
-): string | null {
+function safeResolvePath(baseDir: string, relativePath: string): string | null {
   const normalizedBase = pathResolve(baseDir);
   const resolved = pathResolve(normalizedBase, relativePath);
-  if (!resolved.startsWith(normalizedBase + "/") && resolved !== normalizedBase) {
+  if (
+    !resolved.startsWith(normalizedBase + "/") &&
+    resolved !== normalizedBase
+  ) {
     logger.warn("Path traversal attempt blocked.", {
       baseDir,
       relativePath,
@@ -784,29 +778,24 @@ function safeResolvePath(
 }
 
 // ============================================================
-// Utility: parse COMMIT_MSG from claude -p output
+// Utility: extract searchable text from claude -p output
 // ============================================================
 
-function parseCommitMessage(claudeOutput: string): string | null {
-  let textToSearch = claudeOutput;
-
-  // claude -p may output JSON; try to extract the result text
+function extractSearchableText(claudeOutput: string): string {
   const trimmed = claudeOutput.trim();
   if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
     try {
       const parsed = JSON.parse(trimmed);
       if (typeof parsed.result === "string") {
-        textToSearch = parsed.result;
+        return parsed.result;
       }
     } catch {
-      // Try JSONL: find the last line with a result field
       const jsonLines = trimmed.split("\n");
       for (let i = jsonLines.length - 1; i >= 0; i--) {
         try {
           const parsed = JSON.parse(jsonLines[i]);
           if (typeof parsed.result === "string") {
-            textToSearch = parsed.result;
-            break;
+            return parsed.result;
           }
         } catch {
           continue;
@@ -814,6 +803,15 @@ function parseCommitMessage(claudeOutput: string): string | null {
       }
     }
   }
+  return claudeOutput;
+}
+
+// ============================================================
+// Utility: parse COMMIT_MSG from claude -p output
+// ============================================================
+
+function parseCommitMessage(claudeOutput: string): string | null {
+  const textToSearch = extractSearchableText(claudeOutput);
 
   const lines = textToSearch.split("\n");
   for (let i = lines.length - 1; i >= 0; i--) {
@@ -827,4 +825,30 @@ function parseCommitMessage(claudeOutput: string): string | null {
   }
 
   return null;
+}
+
+// ============================================================
+// Utility: parse per-bug FIX_DETAIL lines from claude -p output
+// ============================================================
+
+function parseFixDetails(claudeOutput: string): Map<string, string> {
+  const details = new Map<string, string>();
+  const textToSearch = extractSearchableText(claudeOutput);
+
+  for (const line of textToSearch.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith(FIX_DETAIL_PREFIX)) {
+      const content = trimmed.substring(FIX_DETAIL_PREFIX.length).trim();
+      const separatorIndex = content.indexOf("|");
+      if (separatorIndex > 0) {
+        const bugId = content.substring(0, separatorIndex).trim();
+        const fixDescription = content.substring(separatorIndex + 1).trim();
+        if (bugId && fixDescription) {
+          details.set(bugId, fixDescription);
+        }
+      }
+    }
+  }
+
+  return details;
 }

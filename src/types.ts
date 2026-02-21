@@ -69,6 +69,7 @@ export interface FixResult {
     bugId: string;
     title: string;
     description: string;
+    fixDescription: string | null;
   }>;
 }
 
