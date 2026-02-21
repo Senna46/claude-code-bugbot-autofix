@@ -256,7 +256,7 @@ class AutofixDaemon {
     const body =
       `${AUTOFIX_COMMENT_MARKER}\n` +
       `[Claude Code Bugbot Autofix](https://github.com/Senna46/claude-code-bugbot-autofix) ` +
-      `committed a fix for ${bugCount} of the ${bugCount} bugs found. ` +
+      `committed fixes for ${bugCount} bug(s). ` +
       `([${commitShort}](${commitUrl}))\n\n` +
       fixedList;
 
