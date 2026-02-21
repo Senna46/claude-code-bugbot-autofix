@@ -42,6 +42,8 @@ const ALLOWED_TOOLS = [
   "Bash(tree *)",
 ].join(",");
 
+const COMMIT_MSG_PREFIX = "COMMIT_MSG: ";
+
 const execFileAsync = promisify(execFile);
 
 export class FixGenerator {
@@ -91,7 +93,11 @@ export class FixGenerator {
         relatedFileContents
       );
 
-      await this.runClaudeFix(repoDir, prompt, bugs.length);
+      const claudeOutput = await this.runClaudeFix(
+        repoDir,
+        prompt,
+        bugs.length
+      );
 
       const hasChanges = await this.hasUncommittedChanges(repoDir);
       if (!hasChanges) {
@@ -99,7 +105,13 @@ export class FixGenerator {
         return null;
       }
 
-      const commitSha = await this.commitAndPush(repoDir, pr.headRef, bugs);
+      const commitSummary = parseCommitMessage(claudeOutput);
+      const commitSha = await this.commitAndPush(
+        repoDir,
+        pr.headRef,
+        bugs,
+        commitSummary
+      );
 
       const fixedBugs = bugs.map((bug) => ({
         bugId: bug.bugId,
@@ -261,7 +273,9 @@ export class FixGenerator {
         "necessary for the fix.\n" +
         "- Follow the existing code style, naming conventions, and patterns in the project.\n" +
         "- Ensure your changes are compatible with the rest of the codebase.\n" +
-        "- Commit messages are not needed - just make the file changes."
+        "- Commit messages are not needed - just make the file changes.\n\n" +
+        "After making all changes, output exactly one line in the following format:\n" +
+        `${COMMIT_MSG_PREFIX}<a concise summary of what was fixed>`
     );
 
     return sections.join("\n\n");
@@ -275,7 +289,7 @@ export class FixGenerator {
     repoDir: string,
     prompt: string,
     bugCount: number
-  ): Promise<void> {
+  ): Promise<string> {
     const args = ["-p", "--allowedTools", ALLOWED_TOOLS];
 
     if (this.config.claudeModel) {
@@ -287,17 +301,18 @@ export class FixGenerator {
       repoDir,
     });
 
-    await new Promise<void>((resolve, reject) => {
+    return new Promise<string>((resolve, reject) => {
       const child = spawn("claude", args, {
         cwd: repoDir,
         stdio: ["pipe", "pipe", "pipe"],
         timeout: 10 * 60 * 1000,
       });
 
+      let stdout = "";
       let stderr = "";
 
-      child.stdout.on("data", () => {
-        // Consume stdout
+      child.stdout.on("data", (data: Buffer) => {
+        stdout += data.toString();
       });
 
       child.stderr.on("data", (data: Buffer) => {
@@ -313,7 +328,7 @@ export class FixGenerator {
           );
           return;
         }
-        resolve();
+        resolve(stdout);
       });
 
       child.on("error", (error) => {
@@ -619,12 +634,19 @@ export class FixGenerator {
   private async commitAndPush(
     repoDir: string,
     branchName: string,
-    bugs: BugbotBug[]
+    bugs: BugbotBug[],
+    commitSummary: string | null
   ): Promise<string> {
     await this.execGit(repoDir, ["add", "-A"]);
 
+    const title = commitSummary
+      ? `fix: ${commitSummary}`
+      : bugs.length === 1
+        ? `fix: ${bugs[0].title}`
+        : "fix: Fix Cursor Bugbot issues";
+
     const bugTitles = bugs.map((b) => `- ${b.title}`).join("\n");
-    const commitMessage = `fix: Claude Code Bugbot Autofix\n\nFixed Cursor Bugbot issues:\n${bugTitles}`;
+    const commitMessage = `${title}\n\n${bugTitles}\n\nApplied via Claude Code Bugbot Autofix`;
 
     await this.execGit(repoDir, ["commit", "-m", commitMessage]);
 
@@ -692,4 +714,50 @@ function extractImportPaths(source: string): string[] {
   }
 
   return paths;
+}
+
+// ============================================================
+// Utility: parse COMMIT_MSG from claude -p output
+// ============================================================
+
+function parseCommitMessage(claudeOutput: string): string | null {
+  let textToSearch = claudeOutput;
+
+  // claude -p may output JSON; try to extract the result text
+  const trimmed = claudeOutput.trim();
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (typeof parsed.result === "string") {
+        textToSearch = parsed.result;
+      }
+    } catch {
+      // Try JSONL: find the last line with a result field
+      const jsonLines = trimmed.split("\n");
+      for (let i = jsonLines.length - 1; i >= 0; i--) {
+        try {
+          const parsed = JSON.parse(jsonLines[i]);
+          if (typeof parsed.result === "string") {
+            textToSearch = parsed.result;
+            break;
+          }
+        } catch {
+          continue;
+        }
+      }
+    }
+  }
+
+  const lines = textToSearch.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i].trim();
+    if (line.startsWith(COMMIT_MSG_PREFIX)) {
+      const message = line.substring(COMMIT_MSG_PREFIX.length).trim();
+      if (message.length > 0) {
+        return message;
+      }
+    }
+  }
+
+  return null;
 }

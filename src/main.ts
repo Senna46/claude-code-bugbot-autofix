@@ -246,14 +246,19 @@ class AutofixDaemon {
     const commitUrl = `https://github.com/${pr.owner}/${pr.repo}/commit/${fixResult.commitSha}`;
 
     const fixedList = fixResult.fixedBugs
-      .map((fb) => `- **${fb.title}**`)
+      .map(
+        (fb) =>
+          `- ✅ Fixed: **${fb.title}**\n  - ${fb.description}`
+      )
       .join("\n");
 
+    const bugCount = fixResult.fixedBugs.length;
     const body =
       `${AUTOFIX_COMMENT_MARKER}\n` +
-      `[Claude Code Bugbot Autofix](https://github.com/Senna46/claude-code-bugbot-autofix) committed fixes to address ` +
-      `${fixResult.fixedBugs.length} Cursor Bugbot issue(s) ([${commitShort}](${commitUrl})).\n\n` +
-      `**Fixed issues:**\n${fixedList}`;
+      `[Claude Code Bugbot Autofix](https://github.com/Senna46/claude-code-bugbot-autofix) ` +
+      `committed a fix for ${bugCount} of the ${bugCount} bugs found. ` +
+      `([${commitShort}](${commitUrl}))\n\n` +
+      fixedList;
 
     try {
       await this.github.createIssueComment(
