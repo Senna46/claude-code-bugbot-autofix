@@ -770,8 +770,9 @@ function safeResolvePath(
   baseDir: string,
   relativePath: string
 ): string | null {
-  const resolved = pathResolve(baseDir, relativePath);
-  if (!resolved.startsWith(baseDir + "/") && resolved !== baseDir) {
+  const normalizedBase = pathResolve(baseDir);
+  const resolved = pathResolve(normalizedBase, relativePath);
+  if (!resolved.startsWith(normalizedBase + "/") && resolved !== normalizedBase) {
     logger.warn("Path traversal attempt blocked.", {
       baseDir,
       relativePath,
