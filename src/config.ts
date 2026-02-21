@@ -1,4 +1,4 @@
-// Configuration loader for Bugbot Autofix.
+// Configuration loader for Claude Code Bugbot Autofix.
 // Reads environment variables (with dotenv support) and validates
 // required settings. Provides sensible defaults for optional values.
 // Limitations: Only supports environment variable configuration,

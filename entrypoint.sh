@@ -1,5 +1,5 @@
 #!/bin/bash
-# Entrypoint for Bugbot Autofix Docker container.
+# Entrypoint for Claude Code Bugbot Autofix Docker container.
 # Verifies Claude CLI authentication and onboarding state
 # before starting the daemon.
 
@@ -37,5 +37,5 @@ else
   echo "Set GH_TOKEN or mount ~/.config/gh with valid auth."
 fi
 
-echo "Starting Bugbot Autofix daemon..."
+echo "Starting Claude Code Bugbot Autofix daemon..."
 exec node dist/main.js

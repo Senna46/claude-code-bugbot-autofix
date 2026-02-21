@@ -1,4 +1,4 @@
-# Dockerfile for Bugbot Autofix
+# Dockerfile for Claude Code Bugbot Autofix
 # Multi-stage build: installs dependencies, builds TypeScript, then
 # runs the daemon with gh CLI, claude CLI, and git available.
 # Requires mounting gh and claude auth configs as volumes.
@@ -43,7 +43,7 @@ RUN npm ci --omit=dev
 COPY --from=builder /app/dist/ ./dist/
 
 RUN git config --global user.email "bugbot-autofix@claude-code.local" \
-  && git config --global user.name "Bugbot Autofix" \
+  && git config --global user.name "Claude Code Bugbot Autofix" \
   && git config --global credential.https://github.com.helper "!/usr/bin/gh auth git-credential"
 
 RUN mkdir -p /data/repos /data/db

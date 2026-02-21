@@ -1,4 +1,4 @@
-// Simple structured logger for Bugbot Autofix.
+// Simple structured logger for Claude Code Bugbot Autofix.
 // Supports log levels (debug, info, warn, error) with
 // timestamped messages to stdout/stderr.
 // Limitations: No file-based logging or log rotation.

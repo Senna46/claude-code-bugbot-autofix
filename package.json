@@ -1,5 +1,5 @@
 {
-  "name": "bugbot-autofix",
+  "name": "claude-code-bugbot-autofix",
   "version": "0.1.0",
   "description": "Automatically fix Cursor Bugbot-reported bugs using Claude Code",
   "type": "module",

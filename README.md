@@ -1,4 +1,4 @@
-# Bugbot Autofix
+# Claude Code Bugbot Autofix
 
 Automatically fix [Cursor Bugbot](https://cursor.com/dashboard?tab=bugbot)-reported bugs using [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
 
@@ -6,11 +6,13 @@ Monitors open pull requests for Cursor Bugbot review comments, parses bug report
 
 ## Features
 
-- **Cursor Bugbot monitoring**: Polls GitHub for open PRs and detects `cursor[bot]` review comments with `BUGBOT_BUG_ID` markers
+- **Cursor Bugbot monitoring**: Polls GitHub for `cursor[bot]` review comments using repo-level API for efficient scanning
+- **Resolved thread filtering**: Skips bugs whose review threads have been resolved (via GraphQL API)
 - **Automatic bug parsing**: Extracts title, severity, description, file path, and line numbers from Bugbot's structured comment format
 - **Claude Code fix generation**: Runs `claude -p` with Edit tools to fix detected bugs in cloned repositories
 - **Direct commit to PR**: Pushes fixes directly to the PR head branch (no separate fix branch or approval workflow)
 - **Duplicate prevention**: SQLite-based state tracking ensures each bug ID is processed only once
+- **Single-instance lock**: File-based lock prevents multiple daemon instances from running concurrently
 - **Fix summary comments**: Posts a summary comment on the PR listing all fixed issues with commit link
 - **Organization-wide monitoring**: Scans all repos under configured GitHub organizations
 - **Docker support**: Production-ready Dockerfile and docker-compose.yml
@@ -136,13 +138,16 @@ Copy `.env.example` to `.env` and configure:
 
 ```mermaid
 flowchart TD
-    Start[Polling Loop] --> ListPRs[List open PRs in monitored repos/orgs]
-    ListPRs --> FetchComments["Fetch review comments from cursor[bot]"]
-    FetchComments --> Parse[Parse bug details from BUGBOT_BUG_ID comments]
+    Start[Polling Loop] --> ListRepos[List all monitored repos/orgs]
+    ListRepos --> FetchComments["Fetch repo-level review comments from cursor[bot]"]
+    FetchComments --> GroupByPR[Group comments by PR]
+    GroupByPR --> Resolved["Filter out resolved threads (GraphQL)"]
+    Resolved --> Parse[Parse bug details from BUGBOT_BUG_ID comments]
     Parse --> Filter[Filter out already-processed bugs via SQLite]
     Filter --> HasBugs{Unprocessed bugs?}
     HasBugs -->|No| Sleep[Sleep poll interval]
-    HasBugs -->|Yes| Clone[Clone/fetch repo, checkout PR head branch]
+    HasBugs -->|Yes| FetchPR[Fetch PR details, skip closed PRs]
+    FetchPR --> Clone[Clone/fetch repo, checkout PR head branch]
     Clone --> Claude["Run claude -p with Edit tools"]
     Claude --> Changes{Changes made?}
     Changes -->|No| Record[Record bugs as processed]
@@ -155,17 +160,17 @@ flowchart TD
 
 ### Module Overview
 
-| Module             | Responsibility                                                           |
-| ------------------ | ------------------------------------------------------------------------ |
-| `main.ts`          | `AutofixDaemon` polling loop, graceful shutdown, fix comment posting     |
-| `config.ts`        | Loads and validates `AUTOFIX_*` environment variables                    |
-| `bugbotMonitor.ts` | Discovers unprocessed Bugbot bugs across all monitored PRs              |
-| `bugParser.ts`     | Parses `cursor[bot]` comment bodies into structured `BugbotBug` objects |
-| `fixGenerator.ts`  | Clones repos, runs `claude -p`, commits and pushes fixes                |
-| `githubClient.ts`  | Octokit wrapper for PR listing, review comments, and issue comments     |
-| `state.ts`         | SQLite tracking of processed bug IDs to prevent duplicates              |
-| `types.ts`         | Shared TypeScript interfaces                                            |
-| `logger.ts`        | Structured logging with configurable levels                             |
+| Module             | Responsibility                                                             |
+| ------------------ | -------------------------------------------------------------------------- |
+| `main.ts`          | `AutofixDaemon` polling loop, graceful shutdown, single-instance lock      |
+| `config.ts`        | Loads and validates `AUTOFIX_*` environment variables                      |
+| `bugbotMonitor.ts` | Efficient repo-level scanning, resolved thread filtering, bug discovery    |
+| `bugParser.ts`     | Parses `cursor[bot]` comment bodies into structured `BugbotBug` objects    |
+| `fixGenerator.ts`  | Clones repos, runs `claude -p`, commits and pushes fixes                  |
+| `githubClient.ts`  | Octokit wrapper: repo-level comments, GraphQL resolved threads, PR details |
+| `state.ts`         | SQLite tracking of processed bug IDs to prevent duplicates                |
+| `types.ts`         | Shared TypeScript interfaces                                              |
+| `logger.ts`        | Structured logging with configurable levels                               |
 
 ## Running as a Service
 
@@ -183,6 +188,78 @@ docker compose logs -f     # View logs
 docker compose restart     # Restart
 docker compose down        # Stop
 docker compose down -v     # Remove with data
+```
+
+### macOS (launchd)
+
+Build the project first:
+
+```bash
+npm run build
+```
+
+Create `~/Library/LaunchAgents/com.bugbot-autofix.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.bugbot-autofix</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/path/to/node</string>
+    <string>dist/main.js</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/path/to/claude-code-bugbot-autofix</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/path/to/node/bin:/usr/local/bin:/usr/bin:/bin</string>
+    <key>HOME</key>
+    <string>/Users/yourname</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/path/to/claude-code-bugbot-autofix/logs/stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/path/to/claude-code-bugbot-autofix/logs/stderr.log</string>
+</dict>
+</plist>
+```
+
+Replace `/path/to/node` with the output of `which node`, and update paths accordingly.
+
+```bash
+# Load (start) the daemon
+launchctl load -w ~/Library/LaunchAgents/com.bugbot-autofix.plist
+
+# Unload (stop) the daemon
+launchctl unload ~/Library/LaunchAgents/com.bugbot-autofix.plist
+
+# Check status
+launchctl list | grep bugbot
+
+# View logs
+tail -f logs/stdout.log
+tail -f logs/stderr.log
+```
+
+Alternatively, run directly with `nohup`:
+
+```bash
+nohup node dist/main.js >> logs/stdout.log 2>> logs/stderr.log &
 ```
 
 ## Related Projects
