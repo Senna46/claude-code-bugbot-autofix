@@ -791,19 +791,27 @@ function extractSearchableText(claudeOutput: string): string {
         return parsed.result;
       }
     } catch {
-      const jsonLines = trimmed.split("\n");
-      for (let i = jsonLines.length - 1; i >= 0; i--) {
-        try {
-          const parsed = JSON.parse(jsonLines[i]);
-          if (typeof parsed.result === "string") {
-            return parsed.result;
-          }
-        } catch {
-          continue;
-        }
-      }
+      // fall through to JSONL line scanning
     }
   }
+
+  // Try JSONL: find the last line with a result field.
+  // This also handles truncated output where the leading { or [ was stripped,
+  // since individual JSONL lines near the end remain intact.
+  const jsonLines = trimmed.split("\n");
+  for (let i = jsonLines.length - 1; i >= 0; i--) {
+    const line = jsonLines[i].trim();
+    if (!line.startsWith("{")) continue;
+    try {
+      const parsed = JSON.parse(line);
+      if (typeof parsed.result === "string") {
+        return parsed.result;
+      }
+    } catch {
+      continue;
+    }
+  }
+
   return claudeOutput;
 }
 
