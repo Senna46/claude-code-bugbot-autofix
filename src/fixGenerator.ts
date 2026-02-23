@@ -764,7 +764,7 @@ function extractImportPaths(source: string): string[] {
 // ============================================================
 
 const CONVENTIONAL_COMMIT_REGEX =
-  /^(fix|feat|chore|refactor|perf|test|docs|style|build|ci|revert)(\(.+?\))?:\s/i;
+  /^(fix|feat|chore|refactor|perf|test|docs|style|build|ci|revert)(\(.+?\))?!?:\s/i;
 
 function hasConventionalCommitPrefix(message: string): boolean {
   return CONVENTIONAL_COMMIT_REGEX.test(message);
