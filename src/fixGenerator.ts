@@ -347,23 +347,27 @@ export class FixGenerator {
         settled = true;
 
         if (signal === "SIGTERM" || signal === "SIGKILL") {
+          logger.error("claude -p timed out.", {
+            signal,
+            timeoutMs: CLAUDE_TIMEOUT_MS,
+            stderr: stderr.substring(0, 1000) || "(empty)",
+            stdoutTail: stdout.substring(Math.max(0, stdout.length - 1000)) || "(empty)",
+          });
           reject(
             new Error(
-              `claude -p fix generation timed out after ${
-                CLAUDE_TIMEOUT_MS / 1000
-              }s. stderr: ${stderr.substring(0, 500)}`
+              `claude -p fix generation timed out after ${CLAUDE_TIMEOUT_MS / 1000}s.`
             )
           );
           return;
         }
         if (code !== 0) {
+          logger.error("claude -p exited with non-zero code.", {
+            exitCode: code,
+            stderr: stderr.substring(0, 1000) || "(empty)",
+            stdoutTail: stdout.substring(Math.max(0, stdout.length - 2000)) || "(empty)",
+          });
           reject(
-            new Error(
-              `claude -p fix generation exited with code ${code}. stderr: ${stderr.substring(
-                0,
-                500
-              )}`
-            )
+            new Error(`claude -p fix generation exited with code ${code}.`)
           );
           return;
         }
@@ -704,12 +708,23 @@ export class FixGenerator {
 
   private async execGit(cwd: string, args: string[]): Promise<string> {
     logger.debug(`git ${args.join(" ")}`, { cwd });
-    const { stdout } = await execFileAsync("git", args, {
-      cwd,
-      maxBuffer: 10 * 1024 * 1024,
-      timeout: 2 * 60 * 1000,
-    });
-    return stdout;
+    try {
+      const { stdout } = await execFileAsync("git", args, {
+        cwd,
+        maxBuffer: 10 * 1024 * 1024,
+        timeout: 2 * 60 * 1000,
+      });
+      return stdout;
+    } catch (error) {
+      const execError = error as { message?: string; stderr?: string; stdout?: string; code?: number | string };
+      logger.error(`git ${args.join(" ")} failed.`, {
+        cwd,
+        exitCode: execError.code,
+        stderr: execError.stderr?.trim() || "(empty)",
+        stdout: execError.stdout?.trim() || "(empty)",
+      });
+      throw error;
+    }
   }
 }
 
