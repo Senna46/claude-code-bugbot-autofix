@@ -246,69 +246,17 @@ docker compose down -v     # Remove with data
 
 ### macOS (launchd)
 
-Build the project first:
+To run as a native LaunchAgent (starts on login, restarts on failure), use the install script. See [deploy/README.md](deploy/README.md) for details.
+
+From the project root:
 
 ```bash
 npm run build
+chmod +x deploy/install-daemon.sh
+./deploy/install-daemon.sh
 ```
 
-Create `~/Library/LaunchAgents/com.bugbot-autofix.plist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
-  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>com.bugbot-autofix</string>
-
-  <key>ProgramArguments</key>
-  <array>
-    <string>/path/to/node</string>
-    <string>dist/main.js</string>
-  </array>
-
-  <key>WorkingDirectory</key>
-  <string>/path/to/claude-code-bugbot-autofix</string>
-
-  <key>EnvironmentVariables</key>
-  <dict>
-    <key>PATH</key>
-    <string>/path/to/node/bin:/usr/local/bin:/usr/bin:/bin</string>
-    <key>HOME</key>
-    <string>/Users/yourname</string>
-  </dict>
-
-  <key>RunAtLoad</key>
-  <true/>
-  <key>KeepAlive</key>
-  <true/>
-
-  <key>StandardOutPath</key>
-  <string>/path/to/claude-code-bugbot-autofix/logs/stdout.log</string>
-  <key>StandardErrorPath</key>
-  <string>/path/to/claude-code-bugbot-autofix/logs/stderr.log</string>
-</dict>
-</plist>
-```
-
-Replace `/path/to/node` with the output of `which node`, and update paths accordingly.
-
-```bash
-# Load (start) the daemon
-launchctl load -w ~/Library/LaunchAgents/com.bugbot-autofix.plist
-
-# Unload (stop) the daemon
-launchctl unload ~/Library/LaunchAgents/com.bugbot-autofix.plist
-
-# Check status
-launchctl list | grep bugbot
-
-# View logs
-tail -f logs/stdout.log
-tail -f logs/stderr.log
-```
+Logs: `~/.bugbot-autofix/logs/stdout.log` and `~/.bugbot-autofix/logs/stderr.log`.
 
 Alternatively, run directly with `nohup`:
 
