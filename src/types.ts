@@ -1,4 +1,4 @@
-// Data models and type definitions for Claude Code Bugbot Autofix.
+// Data models and type definitions for Fixooly.
 // Defines shared interfaces for configuration, parsed Cursor Bugbot
 // bug reports, fix results, and PR metadata.
 // Limitations: BugbotBug fields depend on the Cursor Bugbot comment
@@ -9,8 +9,8 @@
 // ============================================================
 
 export interface Config {
-  githubOrgs: string[];
-  githubRepos: string[];
+  appId: number;
+  privateKey: string;
   pollInterval: number;
   workDir: string;
   dbPath: string;

@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>com.senna.bugbot-autofix</string>
+	<string>com.senna.fixooly</string>
 
 	<key>ProgramArguments</key>
 	<array>
-		<string>__NODE_PATH__</string>
+		<string>/opt/homebrew/bin/node</string>
 		<string>__PROJECT_ROOT__/dist/main.js</string>
 	</array>
 
@@ -32,10 +32,10 @@
 	</dict>
 
 	<key>StandardOutPath</key>
-	<string>__HOME__/.bugbot-autofix/logs/stdout.log</string>
+	<string>__HOME__/.fixooly/logs/stdout.log</string>
 
 	<key>StandardErrorPath</key>
-	<string>__HOME__/.bugbot-autofix/logs/stderr.log</string>
+	<string>__HOME__/.fixooly/logs/stderr.log</string>
 
 	<key>ThrottleInterval</key>
 	<integer>30</integer>

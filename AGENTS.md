@@ -4,7 +4,7 @@ Guidelines for AI agents working on this codebase.
 
 ## Repository Purpose
 
-This is **Claude Code Bugbot Autofix**, a daemon that automatically fixes bugs reported by
+This is **Fixooly**, a daemon that automatically fixes bugs reported by
 Cursor Bugbot on GitHub PRs using Claude Code. It does NOT detect bugs itself;
 it only reads Cursor Bugbot review comments and generates fixes.
 
@@ -42,7 +42,7 @@ it only reads Cursor Bugbot review comments and generates fixes.
 
 ## Key Interfaces
 
-- Config: All AUTOFIX_* settings from environment
+- Config: All AUTOFIX_* settings from environment (appId, privateKey, etc.)
 - BugbotBug: Parsed bug report from Cursor Bugbot comment
 - PrBugReport: A PR with its list of unprocessed bugs
 - FixResult: Commit SHA and list of fixed bugs after claude -p
@@ -58,9 +58,11 @@ After any code change:
 
 ## Environment Variables
 
-All config uses the AUTOFIX_ prefix. At minimum, set one of:
-- AUTOFIX_GITHUB_ORGS (e.g. cauchye)
-- AUTOFIX_GITHUB_REPOS (e.g. cauchye/ai-talent-mapping)
+All config uses the AUTOFIX_ prefix. Required:
+- AUTOFIX_APP_ID (GitHub App ID)
+- AUTOFIX_PRIVATE_KEY_PATH or AUTOFIX_PRIVATE_KEY (GitHub App private key)
+
+Monitored repositories are auto-discovered from the App installations.
 
 ## Common Tasks
 

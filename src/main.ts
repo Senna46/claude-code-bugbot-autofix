@@ -1,7 +1,9 @@
-// Main entry point for Claude Code Bugbot Autofix daemon.
+// Main entry point for Fixooly daemon.
 // Orchestrates the polling loop: discovers Cursor Bugbot reports
 // on open PRs, generates fixes using Claude Code, and commits
 // the fixes directly to the PR head branch.
+// Uses GitHub App authentication; monitored repositories are auto-discovered
+// from App installations.
 // Limitations: Single-threaded; processes PRs sequentially
 //   within each polling cycle. Graceful shutdown on SIGINT/SIGTERM.
 
@@ -18,7 +20,7 @@ import type { Config, FixResult, PrBugReport } from "./types.js";
 
 const AUTOFIX_COMMENT_MARKER = "<!-- BUGBOT_AUTOFIX_COMMENT -->";
 
-class AutofixDaemon {
+class FixoolyDaemon {
   private config: Config;
   private state: StateStore;
   private github!: GitHubClient;
@@ -37,17 +39,19 @@ class AutofixDaemon {
   // ============================================================
 
   async initialize(): Promise<void> {
-    logger.info("Initializing Claude Code Bugbot Autofix...");
+    logger.info("Initializing Fixooly...");
     logger.info("Configuration loaded.", {
-      orgs: this.config.githubOrgs,
-      repos: this.config.githubRepos,
+      appId: this.config.appId,
       pollInterval: this.config.pollInterval,
       claudeModel: this.config.claudeModel ?? "(default)",
     });
 
     await this.verifyPrerequisites();
 
-    this.github = await GitHubClient.createFromGhCli();
+    this.github = await GitHubClient.createFromApp(
+      this.config.appId,
+      this.config.privateKey
+    );
     this.monitor = new BugbotMonitor(this.github, this.state, this.config);
 
     logger.info("Initialization complete. Starting daemon loop.");
@@ -62,21 +66,16 @@ class AutofixDaemon {
     const { promisify } = await import("util");
     const execFileAsync = promisify(execFile);
 
-    const ghToken = process.env.GH_TOKEN;
-    if (ghToken && ghToken.trim()) {
-      logger.debug("Using GH_TOKEN environment variable for authentication.");
-    } else {
-      try {
-        const { stdout } = await execFileAsync("gh", ["auth", "status"]);
-        logger.debug("gh CLI auth status OK.", {
-          output: stdout.substring(0, 200),
-        });
-      } catch {
-        throw new Error(
-          "gh CLI is not authenticated. Set GH_TOKEN environment variable or run 'gh auth login'."
-        );
-      }
+    // Check GitHub App credentials
+    if (!this.config.appId || !this.config.privateKey) {
+      throw new Error(
+        "GitHub App credentials are missing. Set AUTOFIX_APP_ID and " +
+          "AUTOFIX_PRIVATE_KEY_PATH (or AUTOFIX_PRIVATE_KEY)."
+      );
     }
+    logger.debug("GitHub App credentials present.", {
+      appId: this.config.appId,
+    });
 
     try {
       const { stdout } = await execFileAsync("claude", ["--version"]);
@@ -180,7 +179,12 @@ class AutofixDaemon {
     );
 
     try {
-      const fixResult = await this.fixGenerator.fixBugsOnPrBranch(pr, bugs);
+      const gitToken = await this.github.getInstallationToken(pr.owner);
+      const fixResult = await this.fixGenerator.fixBugsOnPrBranch(
+        pr,
+        bugs,
+        gitToken
+      );
 
       if (fixResult) {
         await this.postFixComment(pr, fixResult);
@@ -255,7 +259,7 @@ class AutofixDaemon {
     const bugCount = fixResult.fixedBugs.length;
     const body =
       `${AUTOFIX_COMMENT_MARKER}\n` +
-      `[Claude Code Bugbot Autofix](https://github.com/Senna46/claude-code-bugbot-autofix) ` +
+      `[Fixooly](https://github.com/Senna46/fixooly) ` +
       `committed fixes for ${bugCount} bug(s). ` +
       `([${commitShort}](${commitUrl}))\n\n` +
       fixedList;
@@ -297,7 +301,7 @@ class AutofixDaemon {
 
   private shutdown(): void {
     this.state.close();
-    logger.info("Claude Code Bugbot Autofix stopped.");
+    logger.info("Fixooly stopped.");
   }
 
   private sleep(ms: number): Promise<void> {
@@ -385,7 +389,7 @@ async function main(): Promise<void> {
     mkdirSync(dirname(config.dbPath), { recursive: true });
     lockPath = acquireLock(config.dbPath);
 
-    const daemon = new AutofixDaemon(config);
+    const daemon = new FixoolyDaemon(config);
     await daemon.initialize();
     await daemon.run();
   } catch (error) {

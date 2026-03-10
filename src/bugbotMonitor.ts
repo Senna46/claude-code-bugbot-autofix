@@ -1,6 +1,7 @@
-// Monitor for Cursor Bugbot review comments on GitHub PRs.
+// Monitor for Cursor Bugbot review comments on GitHub PRs (Fixooly).
 // Uses repo-level review comment API to efficiently find cursor[bot]
 // comments without scanning every open PR individually.
+// Repositories are auto-discovered from GitHub App installations.
 // Only PRs with unprocessed, non-resolved Bugbot comments are returned.
 // Limitations: Only detects bugs from cursor[bot] review comments
 //   with the BUGBOT_BUG_ID marker. Does not handle issue comments.
@@ -202,39 +203,21 @@ export class BugbotMonitor {
   }
 
   // ============================================================
-  // List all monitored repos from config
+  // List all monitored repos from App installations
   // ============================================================
 
   private async getAllMonitoredRepos(): Promise<
     Array<{ owner: string; repo: string }>
   > {
+    const accessible = await this.github.listAccessibleRepos();
     const allRepos: Array<{ owner: string; repo: string }> = [];
-    const processedRepos = new Set<string>();
+    const seen = new Set<string>();
 
-    for (const repoSpec of this.config.githubRepos) {
-      const [owner, repo] = repoSpec.split("/");
-      if (!owner || !repo) continue;
-      const repoKey = `${owner}/${repo}`;
-      if (processedRepos.has(repoKey)) continue;
-      processedRepos.add(repoKey);
-      allRepos.push({ owner, repo });
-    }
-
-    for (const org of this.config.githubOrgs) {
-      try {
-        const repos = await this.github.listOwnerRepos(org);
-        for (const repo of repos) {
-          const repoKey = `${repo.owner}/${repo.name}`;
-          if (processedRepos.has(repoKey)) continue;
-          processedRepos.add(repoKey);
-          allRepos.push({ owner: repo.owner, repo: repo.name });
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        logger.error(`Failed to list repos for org "${org}".`, {
-          error: message,
-          org,
-        });
+    for (const { owner, name } of accessible) {
+      const key = `${owner}/${name}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        allRepos.push({ owner, repo: name });
       }
     }
 

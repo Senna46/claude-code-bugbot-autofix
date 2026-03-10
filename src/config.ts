@@ -1,8 +1,11 @@
-// Configuration loader for Claude Code Bugbot Autofix.
-// Reads environment variables (with dotenv support) and validates
-// required settings. Provides sensible defaults for optional values.
+// Configuration loader for Fixooly.
+// Reads AUTOFIX_* environment variables (with dotenv support) and validates
+// required settings. Uses GitHub App authentication (App ID + Private Key).
+// Monitored repositories are auto-discovered from App installations.
 // Limitations: Only supports environment variable configuration,
 //   no config file support.
+
+import { readFileSync } from "fs";
 
 import { config as dotenvConfig } from "dotenv";
 import { homedir } from "os";
@@ -15,32 +18,38 @@ const VALID_LOG_LEVELS: LogLevel[] = ["debug", "info", "warn", "error"];
 export function loadConfig(): Config {
   dotenvConfig();
 
-  const githubOrgs = parseCommaSeparated(process.env.AUTOFIX_GITHUB_ORGS);
-  const githubRepos = parseCommaSeparated(process.env.AUTOFIX_GITHUB_REPOS);
-
-  if (githubOrgs.length === 0 && githubRepos.length === 0) {
+  const appIdStr = process.env.AUTOFIX_APP_ID?.trim();
+  if (!appIdStr) {
     throw new Error(
-      "Configuration error: At least one of AUTOFIX_GITHUB_ORGS or AUTOFIX_GITHUB_REPOS must be set."
+      "Configuration error: AUTOFIX_APP_ID is required."
     );
   }
+  const appId = parseInt(appIdStr, 10);
+  if (isNaN(appId) || appId <= 0) {
+    throw new Error(
+      `Configuration error: AUTOFIX_APP_ID must be a positive integer, got "${appIdStr}".`
+    );
+  }
+
+  const privateKey = loadPrivateKey();
 
   const pollInterval = parsePositiveInt(
     process.env.AUTOFIX_POLL_INTERVAL,
     120
   );
 
-  const defaultWorkDir = join(homedir(), ".bugbot-autofix", "repos");
+  const defaultWorkDir = join(homedir(), ".fixooly", "repos");
   const workDir = process.env.AUTOFIX_WORK_DIR?.trim() || defaultWorkDir;
 
-  const defaultDbPath = join(homedir(), ".bugbot-autofix", "state.db");
+  const defaultDbPath = join(homedir(), ".fixooly", "state.db");
   const dbPath = process.env.AUTOFIX_DB_PATH?.trim() || defaultDbPath;
 
   const claudeModel = process.env.AUTOFIX_CLAUDE_MODEL?.trim() || null;
   const logLevel = parseLogLevel(process.env.AUTOFIX_LOG_LEVEL);
 
   return {
-    githubOrgs,
-    githubRepos,
+    appId,
+    privateKey,
     pollInterval,
     workDir,
     dbPath,
@@ -49,14 +58,28 @@ export function loadConfig(): Config {
   };
 }
 
-function parseCommaSeparated(value: string | undefined): string[] {
-  if (!value || value.trim() === "") {
-    return [];
+function loadPrivateKey(): string {
+  const privateKeyPath = process.env.AUTOFIX_PRIVATE_KEY_PATH?.trim();
+  const privateKeyEnv = process.env.AUTOFIX_PRIVATE_KEY?.trim();
+
+  if (privateKeyPath) {
+    try {
+      return readFileSync(privateKeyPath, "utf-8");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Configuration error: Failed to read private key from AUTOFIX_PRIVATE_KEY_PATH="${privateKeyPath}": ${message}`
+      );
+    }
   }
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter((item) => item.length > 0);
+
+  if (privateKeyEnv) {
+    return privateKeyEnv;
+  }
+
+  throw new Error(
+    "Configuration error: Either AUTOFIX_PRIVATE_KEY_PATH or AUTOFIX_PRIVATE_KEY must be set."
+  );
 }
 
 function parsePositiveInt(

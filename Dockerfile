@@ -1,7 +1,7 @@
-# Dockerfile for Claude Code Bugbot Autofix
+# Dockerfile for Fixooly
 # Multi-stage build: installs dependencies, builds TypeScript, then
-# runs the daemon with gh CLI, claude CLI, and git available.
-# Requires mounting gh and claude auth configs as volumes.
+# runs the daemon with claude CLI and git available.
+# Uses GitHub App authentication (no gh CLI dependency).
 
 # ============================================================
 # Stage 1: Build
@@ -26,11 +26,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     ca-certificates \
-  && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-    -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
-  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-    > /etc/apt/sources.list.d/github-cli.list \
-  && apt-get update && apt-get install -y --no-install-recommends gh \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN npm install -g @anthropic-ai/claude-code
@@ -42,9 +37,8 @@ RUN npm ci --omit=dev
 
 COPY --from=builder /app/dist/ ./dist/
 
-RUN git config --global user.email "bugbot-autofix@claude-code.local" \
-  && git config --global user.name "Claude Code Bugbot Autofix" \
-  && git config --global credential.https://github.com.helper "!/usr/bin/gh auth git-credential"
+RUN git config --global user.email "fixooly@fixooly.local" \
+  && git config --global user.name "Fixooly"
 
 RUN mkdir -p /data/repos /data/db
 

@@ -1,17 +1,15 @@
-// GitHub API client for Claude Code Bugbot Autofix.
-// Wraps Octokit to provide typed operations for monitoring
-// Cursor Bugbot review comments and managing PRs.
-// Uses gh CLI auth token or GH_TOKEN for authentication.
+// GitHub API client for Fixooly.
+// Uses GitHub App authentication with per-installation Octokit instances.
+// Manages JWT auth for app-level operations and installation access tokens
+// for repo-specific API calls and git operations.
 // Limitations: Rate limiting is handled by Octokit built-in throttling.
+//   Installation map is loaded at startup; restart daemon to pick up
+//   newly added App installations.
 
-import { execFile } from "child_process";
-import { Octokit } from "octokit";
-import { promisify } from "util";
+import { App, Octokit } from "octokit";
 
 import { logger } from "./logger.js";
 import type { PullRequest } from "./types.js";
-
-const execFileAsync = promisify(execFile);
 
 export interface ReviewComment {
   id: number;
@@ -26,84 +24,115 @@ export interface ReviewComment {
 }
 
 export class GitHubClient {
-  private octokit: Octokit;
+  private app: App;
+  private installationMap: Map<string, number>;
+  private octokitCache: Map<number, Octokit>;
 
-  constructor(token?: string) {
-    this.octokit = new Octokit({
-      auth: token,
-    });
+  private constructor(app: App) {
+    this.app = app;
+    this.installationMap = new Map();
+    this.octokitCache = new Map();
   }
 
   // ============================================================
-  // Factory: Create client using gh CLI auth token or GH_TOKEN
+  // Factory: Create client from GitHub App credentials
   // ============================================================
 
-  static async createFromGhCli(): Promise<GitHubClient> {
-    const envToken = process.env.GH_TOKEN;
-    if (envToken && envToken.trim()) {
-      const trimmedToken = envToken.trim();
-      validateGitHubToken(trimmedToken);
-      logger.info("GitHub client authenticated via GH_TOKEN environment variable.");
-      return new GitHubClient(trimmedToken);
+  static async createFromApp(
+    appId: number,
+    privateKey: string
+  ): Promise<GitHubClient> {
+    const app = new App({ appId, privateKey });
+    const client = new GitHubClient(app);
+    await client.loadInstallations();
+    return client;
+  }
+
+  // ============================================================
+  // Installation management
+  // ============================================================
+
+  private async loadInstallations(): Promise<void> {
+    this.installationMap.clear();
+    this.octokitCache.clear();
+
+    for await (const { installation } of this.app.eachInstallation.iterator()) {
+      const login = installation.account?.login;
+      if (login) {
+        this.installationMap.set(login.toLowerCase(), installation.id);
+        logger.info(
+          `Found GitHub App installation for "${login}" (ID: ${installation.id}).`
+        );
+      }
     }
 
-    try {
-      const { stdout } = await execFileAsync("gh", ["auth", "token"]);
-      const token = stdout.trim();
-      if (!token) {
-        throw new Error("gh auth token returned empty string.");
-      }
-      logger.info("GitHub client authenticated via gh CLI.");
-      return new GitHubClient(token);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+    if (this.installationMap.size === 0) {
       throw new Error(
-        `Failed to get GitHub token. Set GH_TOKEN environment variable or run 'gh auth login'. Error: ${message}`
+        "No GitHub App installations found. Ensure the App is installed on at least one organization or user account."
       );
     }
+
+    logger.info(
+      `Loaded ${this.installationMap.size} GitHub App installation(s).`
+    );
   }
 
-  async listOwnerRepos(
-    owner: string
-  ): Promise<Array<{ owner: string; name: string }>> {
-    logger.debug("Listing repos for owner.", { owner });
+  private getInstallationId(owner: string): number {
+    const id = this.installationMap.get(owner.toLowerCase());
+    if (id === undefined) {
+      throw new Error(
+        `No GitHub App installation found for owner "${owner}". ` +
+          "Ensure the GitHub App is installed on this account."
+      );
+    }
+    return id;
+  }
 
+  private async getOctokitForOwner(owner: string): Promise<Octokit> {
+    const installationId = this.getInstallationId(owner);
+
+    const cached = this.octokitCache.get(installationId);
+    if (cached) {
+      return cached;
+    }
+
+    const octokit = await this.app.getInstallationOctokit(installationId);
+    this.octokitCache.set(installationId, octokit as Octokit);
+    return octokit as Octokit;
+  }
+
+  // ============================================================
+  // Repository auto-discovery from App installations
+  // ============================================================
+
+  async listAccessibleRepos(): Promise<
+    Array<{ owner: string; name: string }>
+  > {
     const repos: Array<{ owner: string; name: string }> = [];
 
-    try {
-      for await (const response of this.octokit.paginate.iterator(
-        this.octokit.rest.repos.listForOrg,
-        { org: owner, per_page: 100, type: "all" }
-      )) {
-        for (const repo of response.data) {
-          repos.push({ owner, name: repo.name });
-        }
-      }
-      logger.debug(`Found ${repos.length} repo(s) for org "${owner}".`);
-      return repos;
-    } catch (orgError) {
-      logger.debug(`Failed to list repos as org "${owner}", trying as user...`, {
-        error: orgError instanceof Error ? orgError.message : String(orgError),
-      });
+    for await (const { repository } of this.app.eachRepository.iterator()) {
+      repos.push({ owner: repository.owner.login, name: repository.name });
     }
 
-    try {
-      for await (const response of this.octokit.paginate.iterator(
-        this.octokit.rest.repos.listForUser,
-        { username: owner, per_page: 100, type: "owner" }
-      )) {
-        for (const repo of response.data) {
-          repos.push({ owner, name: repo.name });
-        }
-      }
-      logger.debug(`Found ${repos.length} repo(s) for user "${owner}".`);
-    } catch (userError) {
-      logger.error(`Failed to list repos for "${owner}" as both org and user.`, {
-        error: userError instanceof Error ? userError.message : String(userError),
-      });
-    }
-
+    logger.info(
+      `Found ${repos.length} accessible repository/repositories across all installations.`
+    );
     return repos;
+  }
+
+  // ============================================================
+  // Installation access token (for git clone/push operations)
+  // ============================================================
+
+  async getInstallationToken(owner: string): Promise<string> {
+    const installationId = this.getInstallationId(owner);
+
+    const { data } =
+      await this.app.octokit.rest.apps.createInstallationAccessToken({
+        installation_id: installationId,
+      });
+
+    return data.token;
   }
 
   // ============================================================
@@ -121,10 +150,11 @@ export class GitHubClient {
       since: since ?? "(all)",
     });
 
+    const octokit = await this.getOctokitForOwner(owner);
     const commentsByPr = new Map<number, ReviewComment[]>();
 
-    for await (const response of this.octokit.paginate.iterator(
-      this.octokit.rest.pulls.listReviewCommentsForRepo,
+    for await (const response of octokit.paginate.iterator(
+      octokit.rest.pulls.listReviewCommentsForRepo,
       {
         owner,
         repo,
@@ -178,7 +208,8 @@ export class GitHubClient {
   ): Promise<PullRequest | null> {
     logger.debug("Fetching PR details.", { owner, repo, prNumber });
 
-    const { data: pr } = await this.octokit.rest.pulls.get({
+    const octokit = await this.getOctokitForOwner(owner);
+    const { data: pr } = await octokit.rest.pulls.get({
       owner,
       repo,
       pull_number: prNumber,
@@ -220,6 +251,7 @@ export class GitHubClient {
       prNumber,
     });
 
+    const octokit = await this.getOctokitForOwner(owner);
     const resolvedIds = new Set<number>();
     let hasNextPage = true;
     let cursor: string | null = null;
@@ -249,7 +281,7 @@ export class GitHubClient {
       `;
 
       const response: GraphQLReviewThreadsResponse =
-        await this.octokit.graphql(query, {
+        await octokit.graphql(query, {
           owner,
           repo,
           prNumber,
@@ -302,7 +334,8 @@ export class GitHubClient {
   ): Promise<number> {
     logger.debug("Creating issue comment.", { owner, repo, prNumber });
 
-    const { data } = await this.octokit.rest.issues.createComment({
+    const octokit = await this.getOctokitForOwner(owner);
+    const { data } = await octokit.rest.issues.createComment({
       owner,
       repo,
       issue_number: prNumber,
@@ -314,7 +347,7 @@ export class GitHubClient {
 }
 
 // ============================================================
-// Token validation utility
+// Utilities
 // ============================================================
 
 interface GraphQLReviewThreadsResponse {
@@ -341,14 +374,4 @@ interface GraphQLReviewThreadsResponse {
 function extractPrNumberFromUrl(url: string): number | null {
   const match = url.match(/\/pulls\/(\d+)$/);
   return match ? parseInt(match[1], 10) : null;
-}
-
-function validateGitHubToken(token: string): void {
-  const validPrefixes = ["ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_"];
-  const hasValidPrefix = validPrefixes.some((prefix) => token.startsWith(prefix));
-  if (!hasValidPrefix) {
-    throw new Error(
-      `Invalid GH_TOKEN format. GitHub tokens should start with one of: ${validPrefixes.join(", ")}`
-    );
-  }
 }

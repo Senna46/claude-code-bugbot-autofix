@@ -1,11 +1,11 @@
 #!/bin/bash
 
-# Claude Code Bugbot Autofix - Setup Configuration Script
-# This script automates the configuration setup for the bugbot autofix daemon.
+# Fixooly - Setup Configuration Script
+# This script automates the configuration setup for the Fixooly daemon.
 
 set -e  # Exit on any error
 
-echo "=== Claude Code Bugbot Autofix Configuration Setup ==="
+echo "=== Fixooly Configuration Setup ==="
 
 # Detect OS
 OS_TYPE=""
@@ -22,10 +22,6 @@ echo "Detected OS: $OS_TYPE"
 
 # Check if required tools are installed
 echo "Checking for required tools..."
-if ! command -v gh &> /dev/null; then
-    echo "Error: gh CLI is not installed. Please install it from https://cli.github.com/"
-    exit 1
-fi
 
 if ! command -v claude &> /dev/null; then
     echo "Error: claude CLI is not installed. Please install it from https://github.com/anthropics/claude-code"
@@ -41,27 +37,35 @@ else
     echo ".env file already exists"
 fi
 
-# GitHub Authentication Setup
+# GitHub App Credentials Setup
 echo ""
-echo "=== GitHub Authentication Setup ==="
+echo "=== GitHub App Credentials Setup ==="
+echo "You need a GitHub App with the required permissions."
+echo "See: https://docs.github.com/en/apps/creating-github-apps"
 
-if [ "$OS_TYPE" = "linux" ]; then
-    echo "For Linux, running 'gh auth login' to authenticate with GitHub..."
-    gh auth login
-elif [ "$OS_TYPE" = "macos" ]; then
-    echo "For macOS, running 'gh auth login' to authenticate with GitHub..."
-    gh auth login
-    
-    # Check if GH_TOKEN is set in .env
-    if grep -q "^GH_TOKEN=" .env 2>/dev/null; then
-        echo "GH_TOKEN already configured in .env"
-    else
-        echo "Please enter your GitHub token (obtained via 'gh auth token'):"
-        read -r GH_TOKEN
-        if [ -n "$GH_TOKEN" ]; then
-            echo "GH_TOKEN=$GH_TOKEN" >> .env
-            echo "GH_TOKEN added to .env file"
-        fi
+# Check if AUTOFIX_APP_ID is already set
+if grep -q "^AUTOFIX_APP_ID=.\+" .env 2>/dev/null; then
+    echo "AUTOFIX_APP_ID already configured in .env"
+else
+    echo "Please enter your GitHub App ID:"
+    read -r APP_ID
+    if [ -n "$APP_ID" ]; then
+        sed -i.bak "s/^AUTOFIX_APP_ID=.*/AUTOFIX_APP_ID=$APP_ID/" .env
+        rm -f .env.bak
+        echo "AUTOFIX_APP_ID set in .env"
+    fi
+fi
+
+# Check if AUTOFIX_PRIVATE_KEY_PATH is already set
+if grep -q "^AUTOFIX_PRIVATE_KEY_PATH=.\+" .env 2>/dev/null; then
+    echo "AUTOFIX_PRIVATE_KEY_PATH already configured in .env"
+else
+    echo "Please enter the path to your GitHub App private key (.pem file):"
+    read -r KEY_PATH
+    if [ -n "$KEY_PATH" ]; then
+        sed -i.bak "s|^AUTOFIX_PRIVATE_KEY_PATH=.*|AUTOFIX_PRIVATE_KEY_PATH=$KEY_PATH|" .env
+        rm -f .env.bak
+        echo "AUTOFIX_PRIVATE_KEY_PATH set in .env"
     fi
 fi
 
@@ -89,15 +93,12 @@ elif [ "$OS_TYPE" = "macos" ]; then
     fi
 fi
 
-# Make the script executable
-chmod +x setup-config.sh
-
 echo ""
 echo "=== Setup Complete ==="
 echo "Configuration steps completed successfully!"
 echo ""
 echo "Next steps:"
-echo "1. Edit .env with your settings (AUTOFIX_GITHUB_ORGS or AUTOFIX_GITHUB_REPOS)"
+echo "1. Install the GitHub App on your target organizations/user accounts"
 echo "2. Run 'npm install' to install dependencies"
 echo "3. Run 'npm run build' to compile the project"
 echo "4. Run 'npm start' to start the daemon"

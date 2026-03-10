@@ -4,7 +4,7 @@ Instructions for Claude Code when working on this codebase.
 
 ## Project Overview
 
-Claude Code Bugbot Autofix is a TypeScript daemon that monitors GitHub PRs for Cursor Bugbot
+Fixooly is a TypeScript daemon that monitors GitHub PRs for Cursor Bugbot
 review comments, parses bug reports, and auto-fixes them using Claude Code
 (claude -p). Fixes are committed directly to the PR head branch.
 
@@ -13,7 +13,7 @@ review comments, parses bug reports, and auto-fixes them using Claude Code
 - Language: TypeScript (ES2022, Node16 modules)
 - Runtime: Node.js >= 18
 - Package Manager: npm
-- GitHub API: Octokit (via octokit package)
+- GitHub API: Octokit (via octokit package, GitHub App authentication)
 - State: SQLite (via better-sqlite3)
 - Config: dotenv
 - Fix generation: claude -p CLI with Read, Edit, Bash tools
@@ -21,12 +21,12 @@ review comments, parses bug reports, and auto-fixes them using Claude Code
 ## Project Structure
 
     src/
-      main.ts              AutofixDaemon entry point, polling loop
+      main.ts              FixoolyDaemon entry point, polling loop
       config.ts            AUTOFIX_* environment variable loader
       types.ts             Shared interfaces (Config, BugbotBug, FixResult, PullRequest)
       logger.ts            Structured logger with level support
-      githubClient.ts      Octokit wrapper (PR list, review comments, issue comments)
-      bugbotMonitor.ts     Discovers unprocessed cursor[bot] bugs across repos/orgs
+      githubClient.ts      Octokit wrapper (GitHub App auth, PR list, review comments)
+      bugbotMonitor.ts     Discovers unprocessed cursor[bot] bugs via App installations
       bugParser.ts         Parses Cursor Bugbot comment format into BugbotBug objects
       fixGenerator.ts      Clones repo, runs claude -p, commits and pushes fixes
       state.ts             SQLite state tracking (processed_bugs table)
@@ -51,15 +51,17 @@ review comments, parses bug reports, and auto-fixes them using Claude Code
 
 ## Key Patterns
 
-- Polling daemon: AutofixDaemon.run() loops with configurable sleep interval,
+- Polling daemon: FixoolyDaemon.run() loops with configurable sleep interval,
   interruptible via SIGINT/SIGTERM
-- GitHub auth: GH_TOKEN env var takes priority, falls back to gh auth token CLI
+- GitHub auth: GitHub App (JWT + installation access tokens via @octokit/auth-app)
+- Repository discovery: auto-discovered from App installations (no manual repo/org list)
 - Bugbot comment parsing: Regex extraction of BUGBOT_BUG_ID, DESCRIPTION, and
   LOCATIONS markers from cursor[bot] review comments
 - Fix generation: claude -p is spawned as a child process with prompt piped via
   stdin; allowed tools are Read, Edit, and limited Bash (git diff/status only)
 - State: SQLite processed_bugs table with bug_id PRIMARY KEY prevents duplicates
 - Repo cloning: Repos cloned to {workDir}/{owner}/{repo}/; reused with git fetch
+- Git auth for clone/push: Installation access tokens via http.extraheader
 
 ## Important Notes
 
@@ -68,3 +70,5 @@ review comments, parses bug reports, and auto-fixes them using Claude Code
 - Fix generator has a 10-minute timeout for claude -p
 - Git operations have a 2-minute timeout
 - Fixes commit directly to the PR head branch (no separate fix branch)
+- No dependency on gh CLI or GH_TOKEN; authentication is via GitHub App only
+- Environment variables use AUTOFIX_ prefix

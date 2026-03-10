@@ -1,7 +1,7 @@
 {
-  "name": "claude-code-bugbot-autofix",
+  "name": "fixooly",
   "version": "0.1.0",
-  "description": "Automatically fix Cursor Bugbot-reported bugs using Claude Code",
+  "description": "Automatically fix Cursor Bugbot-reported bugs using Claude Code (Fixooly)",
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
@@ -16,6 +16,7 @@
     "cursor",
     "claude-code",
     "autofix",
+    "fixooly",
     "automation"
   ],
   "author": "",

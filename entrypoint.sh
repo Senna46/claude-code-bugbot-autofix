@@ -1,6 +1,6 @@
 #!/bin/bash
-# Entrypoint for Claude Code Bugbot Autofix Docker container.
-# Verifies Claude CLI authentication and onboarding state
+# Entrypoint for Fixooly Docker container.
+# Verifies Claude CLI authentication and GitHub App credentials
 # before starting the daemon.
 
 set -e
@@ -27,15 +27,13 @@ else
   echo "Set CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY, or mount ~/.claude with credentials."
 fi
 
-# Check GitHub auth
-if [ -n "$GH_TOKEN" ]; then
-  echo "GitHub authentication configured via GH_TOKEN."
-elif gh auth status >/dev/null 2>&1; then
-  echo "GitHub authentication configured via gh CLI."
+# Check GitHub App credentials
+if [ -n "$AUTOFIX_APP_ID" ] && { [ -n "$AUTOFIX_PRIVATE_KEY_PATH" ] || [ -n "$AUTOFIX_PRIVATE_KEY" ]; }; then
+  echo "GitHub App credentials configured."
 else
-  echo "WARNING: No GitHub authentication detected."
-  echo "Set GH_TOKEN or mount ~/.config/gh with valid auth."
+  echo "WARNING: GitHub App credentials incomplete."
+  echo "Set AUTOFIX_APP_ID and AUTOFIX_PRIVATE_KEY_PATH (or AUTOFIX_PRIVATE_KEY)."
 fi
 
-echo "Starting Claude Code Bugbot Autofix daemon..."
+echo "Starting Fixooly daemon..."
 exec node dist/main.js
