@@ -618,7 +618,7 @@ export class FixGenerator {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.warn("Failed to retrieve PR diff, continuing without it.", {
-        error: message,
+        error: sanitizeGitError(message),
         baseRef: pr.baseRef,
       });
       return "";

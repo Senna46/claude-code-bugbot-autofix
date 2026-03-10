@@ -40,7 +40,16 @@ fi
 
 mkdir -p "$LAUNCH_AGENTS"
 mkdir -p "$LOG_DIR"
-sed -e "s|__PROJECT_ROOT__|$PROJECT_ROOT|g" -e "s|__HOME__|$HOME|g" -e "s|__NODE_PATH__|$NODE_BIN|g" \
+
+# Escape sed-special characters in replacement values (& and \ with | delimiter)
+escape_sed() {
+  printf '%s\n' "$1" | sed -e 's/[&\\/|]/\\&/g'
+}
+SAFE_PROJECT_ROOT="$(escape_sed "$PROJECT_ROOT")"
+SAFE_HOME="$(escape_sed "$HOME")"
+SAFE_NODE_BIN="$(escape_sed "$NODE_BIN")"
+
+sed -e "s|__PROJECT_ROOT__|$SAFE_PROJECT_ROOT|g" -e "s|__HOME__|$SAFE_HOME|g" -e "s|__NODE_PATH__|$SAFE_NODE_BIN|g" \
   "$SCRIPT_DIR/fixooly-daemon.plist" > "$PLIST_DEST"
 chmod 644 "$PLIST_DEST"
 
