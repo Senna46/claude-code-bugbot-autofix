@@ -740,6 +740,15 @@ export class FixGenerator {
         stderr: sanitizeGitError(execError.stderr?.trim() || "(empty)"),
         stdout: sanitizeGitError(execError.stdout?.trim() || "(empty)"),
       });
+      if (execError.stderr) {
+        execError.stderr = sanitizeGitError(execError.stderr);
+      }
+      if (execError.stdout) {
+        execError.stdout = sanitizeGitError(execError.stdout);
+      }
+      if (execError.message) {
+        execError.message = sanitizeGitError(execError.message);
+      }
       throw error;
     }
   }

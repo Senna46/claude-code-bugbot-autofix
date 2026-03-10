@@ -50,7 +50,8 @@ else
     echo "Please enter your GitHub App ID:"
     read -r APP_ID
     if [ -n "$APP_ID" ]; then
-        sed -i.bak "s/^AUTOFIX_APP_ID=.*/AUTOFIX_APP_ID=$APP_ID/" .env
+        SAFE_APP_ID="$(printf '%s\n' "$APP_ID" | sed -e 's/[&\\/]/\\&/g')"
+        sed -i.bak "s/^AUTOFIX_APP_ID=.*/AUTOFIX_APP_ID=$SAFE_APP_ID/" .env
         rm -f .env.bak
         echo "AUTOFIX_APP_ID set in .env"
     fi
