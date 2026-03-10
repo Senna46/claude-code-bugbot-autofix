@@ -63,7 +63,8 @@ else
     echo "Please enter the path to your GitHub App private key (.pem file):"
     read -r KEY_PATH
     if [ -n "$KEY_PATH" ]; then
-        sed -i.bak "s|^AUTOFIX_PRIVATE_KEY_PATH=.*|AUTOFIX_PRIVATE_KEY_PATH=$KEY_PATH|" .env
+        SAFE_KEY_PATH="$(printf '%s\n' "$KEY_PATH" | sed -e 's/[&\\/|]/\\&/g')"
+        sed -i.bak "s|^AUTOFIX_PRIVATE_KEY_PATH=.*|AUTOFIX_PRIVATE_KEY_PATH=$SAFE_KEY_PATH|" .env
         rm -f .env.bak
         echo "AUTOFIX_PRIVATE_KEY_PATH set in .env"
     fi
