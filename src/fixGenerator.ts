@@ -145,6 +145,9 @@ export class FixGenerator {
         branch: pr.headRef,
         error: sanitizeGitError(message),
       });
+      if (error instanceof Error) {
+        error.message = sanitizeGitError(error.message);
+      }
       throw error;
     } finally {
       this.currentGitToken = null;
@@ -735,7 +738,7 @@ export class FixGenerator {
         cwd,
         exitCode: execError.code,
         stderr: sanitizeGitError(execError.stderr?.trim() || "(empty)"),
-        stdout: execError.stdout?.trim() || "(empty)",
+        stdout: sanitizeGitError(execError.stdout?.trim() || "(empty)"),
       });
       throw error;
     }

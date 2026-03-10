@@ -7,7 +7,7 @@
 
 	<key>ProgramArguments</key>
 	<array>
-		<string>/opt/homebrew/bin/node</string>
+		<string>__NODE_PATH__</string>
 		<string>__PROJECT_ROOT__/dist/main.js</string>
 	</array>
 

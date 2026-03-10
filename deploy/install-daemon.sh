@@ -24,6 +24,12 @@ if [ ! -f "$PROJECT_ROOT/.env" ]; then
   echo "Warning: .env not found. Copy .env.example to .env and configure."
 fi
 
+NODE_BIN="$(which node)"
+if [ -z "$NODE_BIN" ]; then
+  echo "Error: node not found in PATH. Install Node.js first."
+  exit 1
+fi
+
 # Migrate from old bugbot-autofix daemon if present
 if [ -f "$OLD_PLIST_DEST" ]; then
   echo "Unloading old bugbot-autofix daemon..."
@@ -34,7 +40,7 @@ fi
 
 mkdir -p "$LAUNCH_AGENTS"
 mkdir -p "$LOG_DIR"
-sed -e "s|__PROJECT_ROOT__|$PROJECT_ROOT|g" -e "s|__HOME__|$HOME|g" \
+sed -e "s|__PROJECT_ROOT__|$PROJECT_ROOT|g" -e "s|__HOME__|$HOME|g" -e "s|__NODE_PATH__|$NODE_BIN|g" \
   "$SCRIPT_DIR/fixooly-daemon.plist" > "$PLIST_DEST"
 chmod 644 "$PLIST_DEST"
 
