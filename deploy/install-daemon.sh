@@ -20,15 +20,23 @@ if [ ! -f "$PROJECT_ROOT/.env" ]; then
   echo "Warning: .env not found. Copy .env.example to .env and configure."
 fi
 
-NODE_PATH="$(which node)"
-if [ -z "$NODE_PATH" ]; then
+NODE_BIN="$(which node)"
+if [ -z "$NODE_BIN" ]; then
   echo "Error: node not found in PATH. Install Node.js first."
   exit 1
 fi
 
+# Escape sed-special characters in replacement values (& and | with | delimiter)
+escape_sed() {
+  printf '%s\n' "$1" | sed -e 's/[&\\/|]/\\&/g'
+}
+SAFE_PROJECT_ROOT="$(escape_sed "$PROJECT_ROOT")"
+SAFE_HOME="$(escape_sed "$HOME")"
+SAFE_NODE_BIN="$(escape_sed "$NODE_BIN")"
+
 mkdir -p "$LOG_DIR"
 mkdir -p "$LAUNCH_AGENTS"
-sed -e "s|__PROJECT_ROOT__|$PROJECT_ROOT|g" -e "s|__HOME__|$HOME|g" -e "s|__NODE_PATH__|$NODE_PATH|g" \
+sed -e "s|__PROJECT_ROOT__|$SAFE_PROJECT_ROOT|g" -e "s|__HOME__|$SAFE_HOME|g" -e "s|__NODE_PATH__|$SAFE_NODE_BIN|g" \
   "$SCRIPT_DIR/autofix-daemon.plist" > "$PLIST_DEST"
 chmod 644 "$PLIST_DEST"
 
