@@ -705,7 +705,15 @@ export class FixGenerator {
     const bugTitles = bugs.map((b) => `- ${b.title}`).join("\n");
     const commitMessage = `${title}\n\n${bugTitles}\n\nApplied via Fixooly`;
 
-    await this.execGit(repoDir, ["commit", "-m", commitMessage]);
+    const appSlug = "senna-fixooly";
+    const botName = `${appSlug}[bot]`;
+    const botEmail = `${this.config.appId}+${appSlug}[bot]@users.noreply.github.com`;
+
+    await this.execGit(repoDir, [
+      "-c", `user.name=${botName}`,
+      "-c", `user.email=${botEmail}`,
+      "commit", "-m", commitMessage,
+    ]);
 
     const sha = (await this.execGit(repoDir, ["rev-parse", "HEAD"])).trim();
 
