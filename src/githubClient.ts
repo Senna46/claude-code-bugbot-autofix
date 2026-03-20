@@ -393,6 +393,39 @@ export class GitHubClient {
 
     return data.id;
   }
+
+  async hasIssueCommentContaining(
+    owner: string,
+    repo: string,
+    prNumber: number,
+    marker: string
+  ): Promise<boolean> {
+    logger.debug("Checking for existing issue comment with marker.", {
+      owner,
+      repo,
+      prNumber,
+    });
+
+    const octokit = await this.getOctokitForOwner(owner);
+
+    for await (const response of octokit.paginate.iterator(
+      octokit.rest.issues.listComments,
+      {
+        owner,
+        repo,
+        issue_number: prNumber,
+        per_page: 100,
+      }
+    )) {
+      for (const comment of response.data) {
+        if (comment.body?.includes(marker)) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
 }
 
 // ============================================================
