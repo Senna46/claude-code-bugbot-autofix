@@ -229,8 +229,8 @@ export class BugbotMonitor {
   // ============================================================
 
   private computeSinceForRepo(repo: string): string | undefined {
-    if (this.state.hasFailedBugsForRepo(repo)) {
-      logger.debug("Skipping since filter to retry failed bugs.", { repo });
+    if (this.state.hasRetryableBugsForRepo(repo)) {
+      logger.debug("Skipping since filter to retry failed/skipped bugs.", { repo });
       return undefined;
     }
     const lookbackMs = DEFAULT_LOOKBACK_DAYS * 24 * 60 * 60 * 1000;

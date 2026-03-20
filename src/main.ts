@@ -19,6 +19,7 @@ import { StateStore } from "./state.js";
 import type { Config, FixResult, PrBugReport } from "./types.js";
 
 const AUTOFIX_COMMENT_MARKER = "<!-- BUGBOT_AUTOFIX_COMMENT -->";
+const AUTOFIX_NO_CHANGES_MARKER = "<!-- BUGBOT_AUTOFIX_NO_CHANGES -->";
 
 class FixoolyDaemon {
   private config: Config;
@@ -211,17 +212,19 @@ class FixoolyDaemon {
           }
         );
       } else {
+        await this.postNoChangesComment(pr, bugs);
+
         this.state.recordProcessedBugs(
           bugs.map((b) => ({
             bugId: b.bugId,
             repo: repoFullName,
             prNumber: pr.number,
           })),
-          null
+          "SKIPPED_NO_CHANGES"
         );
 
         logger.info(
-          `No changes made for PR #${pr.number}. Bugs recorded as processed.`,
+          `No changes made for PR #${pr.number}. Bugs recorded as skipped.`,
           { prNumber: pr.number, repo: repoFullName }
         );
       }
@@ -282,6 +285,59 @@ class FixoolyDaemon {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.warn("Failed to post fix comment on PR.", {
+        error: message,
+        prNumber: pr.number,
+        repo: `${pr.owner}/${pr.repo}`,
+      });
+    }
+  }
+
+  // ============================================================
+  // Post no-changes comment on the PR
+  // ============================================================
+
+  private async postNoChangesComment(
+    pr: { owner: string; repo: string; number: number },
+    bugs: import("./types.js").BugbotBug[]
+  ): Promise<void> {
+    try {
+      const alreadyPosted = await this.github.hasIssueCommentContaining(
+        pr.owner,
+        pr.repo,
+        pr.number,
+        AUTOFIX_NO_CHANGES_MARKER
+      );
+      if (alreadyPosted) {
+        logger.debug("No-changes comment already exists on PR, skipping.", {
+          prNumber: pr.number,
+          repo: `${pr.owner}/${pr.repo}`,
+        });
+        return;
+      }
+
+      const bugList = bugs
+        .map((b) => `- ⏭️ Skipped: **${b.title}**`)
+        .join("\n");
+
+      const body =
+        `${AUTOFIX_COMMENT_MARKER}\n${AUTOFIX_NO_CHANGES_MARKER}\n` +
+        `[Fixooly](https://github.com/Senna46/fixooly) ` +
+        `analyzed ${bugs.length} bug(s) but determined no code changes were needed.\n\n` +
+        bugList;
+
+      await this.github.createIssueComment(
+        pr.owner,
+        pr.repo,
+        pr.number,
+        body
+      );
+      logger.debug("Posted no-changes comment on PR.", {
+        prNumber: pr.number,
+        repo: `${pr.owner}/${pr.repo}`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("Failed to post no-changes comment on PR.", {
         error: message,
         prNumber: pr.number,
         repo: `${pr.owner}/${pr.repo}`,
