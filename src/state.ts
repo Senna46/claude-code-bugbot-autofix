@@ -57,7 +57,7 @@ export class StateStore {
   hasRetryableBugsForRepo(repo: string): boolean {
     const row = this.db
       .prepare(
-        "SELECT 1 FROM processed_bugs WHERE fix_commit_sha IN ('FAILED', 'SKIPPED_NO_CHANGES') AND repo = ? LIMIT 1"
+        "SELECT 1 FROM processed_bugs WHERE fix_commit_sha = 'FAILED' AND repo = ? LIMIT 1"
       )
       .get(repo);
     return row !== undefined;
