@@ -50,8 +50,8 @@ export class StateStore {
     const row = this.db
       .prepare("SELECT fix_commit_sha FROM processed_bugs WHERE bug_id = ?")
       .get(bugId) as { fix_commit_sha: string | null } | undefined;
-    // Bugs marked as FAILED or SKIPPED_NO_CHANGES should be retried
-    return row !== undefined && row.fix_commit_sha !== "FAILED" && row.fix_commit_sha !== "SKIPPED_NO_CHANGES";
+    // Only FAILED bugs should be retried; SKIPPED_NO_CHANGES is terminal
+    return row !== undefined && row.fix_commit_sha !== "FAILED";
   }
 
   hasRetryableBugsForRepo(repo: string): boolean {
