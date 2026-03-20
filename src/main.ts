@@ -211,6 +211,8 @@ class FixoolyDaemon {
           }
         );
       } else {
+        await this.postNoChangesComment(pr, bugs);
+
         this.state.recordProcessedBugs(
           bugs.map((b) => ({
             bugId: b.bugId,
@@ -282,6 +284,45 @@ class FixoolyDaemon {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.warn("Failed to post fix comment on PR.", {
+        error: message,
+        prNumber: pr.number,
+        repo: `${pr.owner}/${pr.repo}`,
+      });
+    }
+  }
+
+  // ============================================================
+  // Post no-changes comment on the PR
+  // ============================================================
+
+  private async postNoChangesComment(
+    pr: { owner: string; repo: string; number: number },
+    bugs: import("./types.js").BugbotBug[]
+  ): Promise<void> {
+    const bugList = bugs
+      .map((b) => `- ⏭️ Skipped: **${b.title}**`)
+      .join("\n");
+
+    const body =
+      `${AUTOFIX_COMMENT_MARKER}\n` +
+      `[Fixooly](https://github.com/Senna46/fixooly) ` +
+      `analyzed ${bugs.length} bug(s) but determined no code changes were needed.\n\n` +
+      bugList;
+
+    try {
+      await this.github.createIssueComment(
+        pr.owner,
+        pr.repo,
+        pr.number,
+        body
+      );
+      logger.debug("Posted no-changes comment on PR.", {
+        prNumber: pr.number,
+        repo: `${pr.owner}/${pr.repo}`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn("Failed to post no-changes comment on PR.", {
         error: message,
         prNumber: pr.number,
         repo: `${pr.owner}/${pr.repo}`,
